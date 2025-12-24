@@ -1,0 +1,38 @@
+<!-- variable_access.html -->
+<!DOCTYPE html>
+<html>
+
+<head>
+    <script type="text/javascript" src="module1.js">
+    </script>
+</head>
+
+<body>
+    <button onclick="f()">
+        Click Me To Get Student Details
+    </button>
+
+    <div>
+        <p id="text" style="color:purple; 
+            font-weight:bold;font-size:20px;">
+        </p>
+    </div>
+
+    <script type="text/javascript">
+        function f() {
+            let name = Student.name;
+            let age = Student.age;
+            let dept = Student.dept;
+            let score = Student.score;
+
+            let str = "Name:" + name + "\nAge: "
+                + age + "\nDepartment:" + dept
+                + "\nScore: " + score;
+
+            document.getElementById(
+                'text').innerHTML = str;
+        }
+    </script>
+</body>
+
+</html>

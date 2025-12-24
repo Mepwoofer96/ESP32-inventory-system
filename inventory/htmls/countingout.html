@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+<head>
+
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+
+</head>
+<body>
+
+    <div class="counter">
+    <p id="count">0</p>
+    </div>
+
+    <button onclick="inc()">Increase</button> <br>
+    <button onclick="send()">Submit</button>
+    <br>
+    
+    <p>Submit number instead</p>
+    <input type="number" id="numinput"></input> 
+    <br>
+    <button onclick="send2()">Submit</button>
+
+    <script type="text/javascript">
+    const count = document.getElementById("count");
+    const input = document.getElementById("numinput");
+
+    let c = Number(localStorage.getItem("newnum")) || 0;
+    document.getElementById("count").textContent = c;
+
+    function inc() {
+        c++;
+        document.getElementById("count").textContent = c;
+    }
+
+    function send() {
+        localStorage.setItem("newnum", c);
+    
+    }
+
+    function send2(){
+    c = Number(input.value);
+    count.textContent = c;
+    document.getElementById("count").textContent = c;
+    // Save locally
+    localStorage.setItem("newnum", c);
+}
+    </script>
+
+</body>
+</html>
