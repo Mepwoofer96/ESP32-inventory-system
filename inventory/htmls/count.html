@@ -3,6 +3,8 @@
 <head>
 <img src="cat.jpg" alt="cat">
 
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
 </head>
 <body>
     <div class="container">
@@ -25,12 +27,18 @@
         const decCount = document.getElementById("decCount");
         function inc() {
             c++;
-            ci = (ci >= 10) ? 0 : ci + 1;
+            ci = ci+1;
+            if(ci >= 10){
+                ci=0;            
+            }
             update();
         }
         function dec() {
-            c = c > 0 ? c - 1 : 0;
-            cd = (cd >= 10) ? 0 : cd + 1;
+            c = c-1;
+            cd = cd+1;
+            if(cd >= 10){
+                cd=0;            
+            }
             update();
         }
         function update() {

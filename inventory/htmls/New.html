@@ -21,8 +21,8 @@
 
 <!external link>
 <a href="https://www.google.com"> Google </a>|
-<a href="dontvisit.html">dont click</a> <br>
-
+<a href="dontvisit.html">dont click</a> |
+<a href="format.html">Format</a> | <br>
 <!self parent and top all open up on the current tab blank opens in a new tab>
 <a href="count.html" target="_self"> count self </a> |
 <a href="count.html" target="_blank"> count blank </a> |
@@ -36,10 +36,11 @@
 <!internal bookmark>
 <pa><a href="#CAT">go to cat</a></p> |
 <a href= "longdoc.html#DOG">Jump to dog </a>
+<button onclick="deletblac()">Hide black</button>
 
 
 <h1>This is a Heading</h1>
-<p>This is a paragraph.</p>
+<p class="blc">This is a paragraph.</p>
 
  <p>This is a <br> paragraph with a line break.</p> 
 
@@ -60,12 +61,32 @@
 <img src="box.jpg" alt="box" style="width:200px;height:200px">
 </a>
 
-<div> 
+<div class="blc"> 
 <h2>This is a heading</h2>
 <p1> theis should be a realatively long para graph but im lazy theis should be a realatively <span style="color:blue">long </span> para graph but im lazy theis should be a realatively long para graph but im lazy theis should be a realatively long para graph but im lazy </p1>
 
 </div>
 
+<button onclick="alert('Hello!')">Click Me</button> 
+
+<button type="button">Normal Button</button>
+<button type="submit">Submit</button>
+<button type="reset">Reset</button>
+
+<iframe src="example.pdf" title="description"></iframe>
+
+<!script to delete all elements with the class blc uses java>
+<! getElementById().doing to.thing=whatis its doing is also a java>
+<script> 
+function deletblac(){
+    var x= document.getElementsByClassName("blc");
+    for(var i=0; i<x.length; i++){
+    x[i].style.display="none";
+    }
+
+
+}
+</script>
 </body>
 </html> 
 
