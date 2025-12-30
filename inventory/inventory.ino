@@ -1,20 +1,59 @@
+#include <Arduino.h>
 #include <WiFi.h>
-#include <WebServer.h>
-#include <SPI.h>
-#include <SD.h>
-#include <FS.h>
-#include "SPIFFS.h"
+#include <AsyncTCP.h>
+#include <ESPAsyncWebServer.h>
+#include "FS.h"
+#include "SD.h"
+#include "SPI.h"
+
 
 const char* ssid = "Inventory_ESP";
 const char* password = "Password?";
 
-WebServer server(80);
+AsyncWebServer server(80);
 
 #define SD_MOSI 23
 #define SD_MISO 19
 #define SD_SCLK 18
-#define SD_CS   5
-#define BLINK   2
+#define SD_CS 5
+#define BLINK 2
+
+void initSDCard(){
+  if(!SD.begin()){
+    Serial.println("Card Mount Failed");
+    return;
+  }
+  uint8_t cardType = SD.cardType();
+
+  if(cardType == CARD_NONE){
+    Serial.println("No SD card attached");
+    return;
+  }
+
+  Serial.print("SD Card Type: ");
+  if(cardType == CARD_MMC){
+    Serial.println("MMC");
+  } else if(cardType == CARD_SD){
+    Serial.println("SDSC");
+  } else if(cardType == CARD_SDHC){
+    Serial.println("SDHC");
+  } else {
+    Serial.println("UNKNOWN");
+  }
+  uint64_t cardSize = SD.cardSize() / (1024 * 1024);
+  Serial.printf("SD Card Size: %lluMB\n", cardSize);
+}
+
+void initWiFi() {
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ssid, password);
+  Serial.print("Connecting to WiFi ..");
+  while (WiFi.status() != WL_CONNECTED) {
+    Serial.print('.');
+    delay(1000);
+  }
+  Serial.println(WiFi.localIP());
+}
 
 void handleRoot() {
   File file = SPIFFS.open("/index.html", "r");
@@ -30,45 +69,47 @@ void setup() {
   Serial.begin(115200);
   Serial.println("\n[*] Creating AP");
 
-  SPI.begin(SD_SCLK, SD_MISO, SD_MOSI, SD_CS);
+  //mounting sd
+ if(!SD_MMC.begin()) { // Attempt to mount the SD card
+    Serial.println("Failed to mount card"); // If mount fails, print to serial and exit setup
+    return;
+}
 
   pinMode(BLINK, OUTPUT);
 
-  if (!SD.begin(SD_CS)) {
-    Serial.println("SD Card MOUNT FAIL");
-  } else {
-    Serial.println("SD Card Mounted Successfully");
-  }
 
+  //wifi
   WiFi.mode(WIFI_AP);
   WiFi.softAP(ssid, password);
 
-  IPAddress local_ip(192, 168, 4, 1);
-  IPAddress gateway(192, 168, 4, 1);
-  IPAddress subnet(255, 255, 255, 0);
-  WiFi.softAPConfig(local_ip, gateway, subnet);
+  IPAddress IP = WiFi.softAPIP();
+  Serial.print("AP IP address: ");
+  Serial.print(IP);
 
-  Serial.print("[+] AP Created with IP Gateway ");
-  Serial.println(WiFi.softAPIP());
+  sever.begin();
+
+  //sd card
 
   if (!SPIFFS.begin(true)) {
     Serial.println("An Error has occurred while mounting SPIFFS");
     return;
   }
-
-  server.on("/", handleRoot);
-  server.begin();
-  Serial.println("HTTP server started");
 }
 
 void loop() {
-  int n = WiFi.softAPgetStationNum();
 
-  if (n > 0) {
-    digitalWrite(BLINK, HIGH);
-  } else {
-    digitalWrite(BLINK, LOW);
+  WiFiClient client = server.available();  // Listen for incoming clients
+
+  if (client) {
+    String currentLine = "";      // make a String to hold incoming data from the client
+    while (client.connected()) {  // loop while the client's connected
+      if (client.available()) {   // if there's bytes to read from the client,
+        server.handleClient();
+        digitalWrite(BLINK, HIGH);
+
+      } else {
+        digitalWrite(BLINK, LOW);
+      }
+    }
   }
-
-  server.handleClient();
 }
