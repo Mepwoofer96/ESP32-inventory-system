@@ -1,13 +1,4 @@
-/*
-  Rui Santos
-  Complete project details at https://RandomNerdTutorials.com/esp32-web-server-microsd-card/
-  
-  Permission is hereby granted, free of charge, to any person obtaining a copy
-  of this software and associated documentation files.
-  
-  The above copyright notice and this permission notice shall be included in all
-  copies or substantial portions of the Software.
-*/
+// this works as a point connected to a wifi network
 
 #include <Arduino.h>
 #include <WiFi.h>
@@ -18,8 +9,8 @@
 #include "SPI.h"
 
 // Replace with your network credentials
-const char* ssid = "REPLACE_WITH_YOUR_SSID";
-const char* password = "REPLACE_WITH_YOUR_PASSWORD";
+const char* ssid = "ssid";
+const char* password = "password";
 
 // Create AsyncWebServer object on port 80
 AsyncWebServer server(80);
@@ -67,10 +58,10 @@ void setup() {
   initSDCard();
 
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
-    request->send(SD, "/index.html", "text/html");
+    request->send(SD, "/htmls/index.html", "text/html");
   });
 
-  server.serveStatic("/", SD, "/");
+  server.serveStatic("/", SD, "/htmls/");
 
   server.begin();
 }
@@ -78,3 +69,4 @@ void setup() {
 void loop() {
   
 }
+
