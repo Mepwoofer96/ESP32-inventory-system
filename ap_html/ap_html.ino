@@ -14,9 +14,6 @@ const char* password = "123456789";
 // Create AsyncWebServer object on port 80
 AsyncWebServer server(80);
 
-// Variable to store the HTTP request
-String header;
-
 void initSDCard(){
   if(!SD.begin()){
     Serial.println("Card Mount Failed");
