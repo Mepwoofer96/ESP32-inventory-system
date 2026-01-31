@@ -1,0 +1,16 @@
+#workspace {
+  width: 100vw;
+  height: 100vh;
+  border: 1px solid #444;
+}
+
+.slot {
+  fill: none;
+  stroke: #aaa;
+  stroke-dasharray: 8;
+}
+
+#userItem {
+  fill: dodgerblue;
+  cursor: grab;
+}
