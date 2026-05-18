@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Product Inventory Management</title>
+    <link rel="stylesheet" href="expand.css">
+</head>
+<body>
+    <div class="container">
+        <h2>Product Inventory Management</h2>
+        <input type="text" id="productName" placeholder="Enter Product Name">
+        <input type="number" id="productStock" placeholder="Enter Stock Quantity">
+        <button onclick="addProduct()">Add Product</button>
+        <table>
+            <thead>
+                <tr>
+                    <th>Product Name</th>
+                    <th>Stock</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody id="productTable">
+            </tbody>
+        </table>
+    </div>
+    <script src="expand.js"></script>
+</body>
+</html>
