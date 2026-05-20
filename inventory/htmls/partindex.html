@@ -1,0 +1,38 @@
+
+<!DOCTYPE html>
+<html lang="en-US">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    <link rel="stylesheet" href="partindex.css">
+
+    <title>Parts Index</title>
+    <link rel="icon" type="jpg" href="cat.jpg">
+
+</head>
+
+<body>
+<h1> Parts Index</h1>
+
+<div class="container">
+    <h2>List of parts</h2>
+        <input type="text" id="productName" placeholder="Enter Product Name">
+        <input type="number" id="productStock" placeholder="Enter Stock Quantity">
+        <button onclick="addProduct()">Add Product</button>
+        <table>
+            <thead>
+                <tr>
+                    <th>Product Name</th>
+                    <th>Stock</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody id="productTable">
+            </tbody>
+        </table>
+    </div>
+    <script src="partindex.js"></script>
+
+</body>
