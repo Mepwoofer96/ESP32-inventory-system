@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Admin</title>
+</head>
+<body>
+    <h1>Add New Part</h1>
+    <form action="/addpart" method="POST" enctype="multipart/form-data">
+        <p>
+            <label>Part Name</label>
+            <input type="text" name="name" placeholder="Part name">
+        </p>
+        <p>
+            <label>Stock Count</label>
+            <input type="number" name="count" placeholder="Count">
+        </p>
+        <p>
+            <label>PDF Data Sheet</label>
+            <input type="file" name="pdf" accept=".pdf">
+        </p>
+        <p>
+            <label>Photo</label>
+            <input type="file" name="photo" accept=".jpg">
+        </p>
+        <button type="submit">Add Part</button>
+    </form>
+    <form action="/deletepart" method="POST">
+        <p>
+            <h1>Remove Part</h1>
+
+            <input type="text" name="name" placeholder="Part Name">
+            <button type="submit"> Delete Part</button>
+        </p>
+    </form>
+</body>
+</html>
