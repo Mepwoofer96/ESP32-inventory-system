@@ -1,30 +1,40 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>ESP32 Inventory Server (index Page)</title>
+  <title>Inventory — Light it Up LLC</title>
+  <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" href="data:,">
   <link rel="stylesheet" type="text/css" href="style.css">
 </head>
 <body>
-    <h1>Title</h1>
-    <button onclick="document.location='part.html'">Part</button> |
-    <button onclick="document.location='admin.html'">admin</button> |
 
-<div class="container">
-    <h2> Inventory Parts List</h2>
-    <table>
-        <thread>
-            <tr>
-                <th>Product Name</th>
-                <th>Stock</th>
-                <th>Data Sheet</th>
-            </tr>
-        </thread>
+  <div class="topbar">
+    <span class="topbar-brand">Light it Up &nbsp;· &nbsp;Inventory</span>
+    <nav class="topbar-nav">
+      <a class="nav-btn active" href="/">Index</a>
+      <a class="nav-btn" href="/admin">Admin</a>
+    </nav>
+  </div>
+
+  <div class="page">
+    <h1>Parts <span>List</span></h1>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Part Name</th>
+            <th>Stock</th>
+            <th>Data Sheet</th>
+          </tr>
+        </thead>
         <tbody id="productTable">
-            %PART_LIST%
+          %PART_LIST%
         </tbody>
-    </table>
-</div>
+      </table>
+    </div>
+  </div>
+
 </body>
 </html>

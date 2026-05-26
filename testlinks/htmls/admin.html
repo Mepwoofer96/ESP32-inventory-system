@@ -1,36 +1,62 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Admin</title>
+  <title>Admin — Inventory</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" type="text/css" href="style.css">
 </head>
 <body>
-    <h1>Add New Part</h1>
-    <form action="/addpart" method="POST" enctype="multipart/form-data">
-        <p>
-            <label>Part Name</label>
-            <input type="text" name="name" placeholder="Part name">
-        </p>
-        <p>
-            <label>Stock Count</label>
-            <input type="number" name="count" placeholder="Count">
-        </p>
-        <p>
-            <label>PDF Data Sheet</label>
-            <input type="file" name="pdf" accept=".pdf">
-        </p>
-        <p>
-            <label>Photo</label>
-            <input type="file" name="photo" accept=".jpg">
-        </p>
-        <button type="submit">Add Part</button>
-    </form>
-    <form action="/deletepart" method="POST">
-        <p>
-            <h1>Remove Part</h1>
 
-            <input type="text" name="name" placeholder="Part Name">
-            <button type="submit"> Delete Part</button>
-        </p>
-    </form>
+  <div class="topbar">
+    <span class="topbar-brand">// Light it Up &nbsp;· &nbsp;Inventory</span>
+    <nav class="topbar-nav">
+      <a class="nav-btn" href="/">Index</a>
+      <a class="nav-btn active" href="/admin">Admin</a>
+    </nav>
+  </div>
+
+  <div class="page">
+    <h1>Admin <span>Panel</span></h1>
+
+    <!-- Add Part -->
+    <div class="form-card">
+      <h2>Add New Part</h2>
+      <form action="/addpart" method="POST" enctype="multipart/form-data">
+        <div class="field">
+          <label>Part Name</label>
+          <input type="text" name="name" placeholder="e.g. 10k Resistor">
+        </div>
+        <div class="field">
+          <label>Stock Count</label>
+          <input type="number" name="count" placeholder="e.g. 47">
+        </div>
+        <div class="field">
+          <label>PDF Data Sheet</label>
+          <input type="file" name="pdf" accept=".pdf">
+        </div>
+        <div class="field">
+          <label>Photo</label>
+          <input type="file" name="photo" accept=".jpg,.jpeg">
+        </div>
+        <button class="btn btn-primary" type="submit">Add Part</button>
+      </form>
+    </div>
+
+    <!-- Delete Part -->
+    <div class="form-card">
+      <h2>Remove Part</h2>
+      <form action="/deletepart" method="POST">
+        <div class="field">
+          <label>Part Name</label>
+          <input type="text" name="name" placeholder="Exact part name to delete">
+        </div>
+        <button class="btn btn-danger" type="submit">Delete Part</button>
+      </form>
+    </div>
+
+  </div>
+
 </body>
 </html>

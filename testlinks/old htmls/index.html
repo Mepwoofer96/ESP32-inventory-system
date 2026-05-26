@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>ESP32 Inventory Server (index Page)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" type="text/css" href="style.css">
+</head>
+<body>
+    <h1>Title</h1>
+    <button onclick="document.location='part.html'">Part</button> |
+    <button onclick="document.location='admin.html'">admin</button> |
+
+<div class="container">
+    <h2> Inventory Parts List</h2>
+    <table>
+        <thread>
+            <tr>
+                <th>Product Name</th>
+                <th>Stock</th>
+                <th>Data Sheet</th>
+            </tr>
+        </thread>
+        <tbody id="productTable">
+            %PART_LIST%
+        </tbody>
+    </table>
+</div>
+</body>
+</html>

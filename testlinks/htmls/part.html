@@ -1,15 +1,43 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>ESP32 Inventory Server (part page)</title>
+  <title>%PART_NAME% — Inventory</title>
+  <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" href="data:,">
   <link rel="stylesheet" type="text/css" href="style.css">
 </head>
 <body>
-    <h1>Title</h1>
-    <tbody id="productTable">
-    %PART_LIST%
-</tbody>
+
+  <div class="topbar">
+    <span class="topbar-brand">// Light it Up &nbsp;· &nbsp;Inventory</span>
+    <nav class="topbar-nav">
+      <a class="nav-btn" href="/">Index</a>
+      <a class="nav-btn" href="/admin">Admin</a>
+    </nav>
+  </div>
+
+  <div class="page">
+    <h1>Part <span>Detail</span></h1>
+
+    <div class="part-card">
+      <div class="part-photo">
+        <img src="%PART_PHOTO%" alt="%PART_NAME%" onerror="this.parentElement.innerHTML='<span class=\'no-photo\'>No photo available</span>'">
+      </div>
+      <div class="part-info">
+        <div class="part-name">%PART_NAME%</div>
+        <div class="part-meta">
+          <div class="meta-row">
+            <span class="meta-label">Stock</span>
+            <span class="meta-value stock">%PART_COUNT%</span>
+          </div>
+        </div>
+        <a class="pdf-link" href="%PART_PDF%" target="_blank">
+          ↗ View Data Sheet
+        </a>
+      </div>
+    </div>
+  </div>
+
 </body>
 </html>
