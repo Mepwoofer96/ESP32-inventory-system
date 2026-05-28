@@ -26,20 +26,24 @@
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
 #include <DNSServer.h>
-
-// possibly not needed
-//#include <ESPmDNS.h> 
-
+#include <ESPmDNS.h>
 #include "FS.h"
 #include "SD.h"
 #include "SPI.h"
 
 
-const char* ssid = "Inventory_ESP";
-const char* password = "Password?";
+const char* apssid = "Inventory_ESP";
+const char* appassword = "Password?";
 const char* fake_hostname = "inventory";
 
-AsyncWebServer server(80);
+bool wifiRequested = false;
+bool apRequested = false;
+bool serverStarted = false;
+
+String wifiSSID = "";
+String wifiPass = "";
+
+AsyncWebServer* server = nullptr;
 
 //for dns lying
 DNSServer dnsServer;
@@ -47,73 +51,335 @@ DNSServer dnsServer;
 IPAddress apIP(192, 168, 4, 1);
 IPAddress netMsk(255, 255, 255, 0);
 
-// SD Card initalization
-void initSDCard() {
-  if (!SD.begin()) {
-    Serial.println("Card Mount Failed");
-    return;
-  }
-  uint8_t cardType = SD.cardType();
+// For getting the correcct part when asked on html
+String currentPartName = "";
+String cachedName = "";
+String cachedCount = "";
+String cssCache = "";
 
-  if (cardType == CARD_NONE) {
-    Serial.println("No SD card attached");
-    return;
+void loadFileCache() {
+  File f = SD.open("/htmls/style.css", "r");
+  if (f) {
+    while (f.available()) {
+      cssCache += (char)f.read();
+    }
+    f.close();
+    Serial.println("CSS cached");
   }
-
-  Serial.print("SD Card Type: ");
-  if (cardType == CARD_MMC) {
-    Serial.println("MMC");
-  } else if (cardType == CARD_SD) {
-    Serial.println("SDSC");
-  } else if (cardType == CARD_SDHC) {
-    Serial.println("SDHC");
-  } else {
-    Serial.println("UNKNOWN");
-  }
-  uint64_t cardSize = SD.cardSize() / (1024 * 1024);
-  Serial.printf("SD Card Size: %lluMB\n", cardSize);
 }
 
+  void loadPartCache(const String& name) {
+    if (cachedName == name) return;
+    File file = SD.open("/data/parts.csv", "r");
+    while (file.available()) {
+      String line = file.readStringUntil('\n');
+      line.trim();
+      int commaIndex = line.indexOf(',');
+      String n = line.substring(0, commaIndex);
+      if (n == name) {
+        cachedName = n;
+        cachedCount = line.substring(commaIndex + 1);
+        break;
+      }
+    }
+    file.close();
+  }
 
-//for other mode
-void initWiFi() {
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(ssid, password);
-  Serial.print("Connecting to WiFi ..");
-  while (WiFi.status() != WL_CONNECTED) {
-    Serial.print('.');
+  // PROCESSOR
+  // handles all %VARS% in htmls
+  String processor(const String& var) {
+    // If var is %PART_LIST% used in index to show all current inventory options
+    if (var == "PART_LIST") {
+      File file = SD.open("/data/parts.csv", "r");
+      if (!file) {
+        return "<tr><td>No parts found</td></tr>";
+      }
+      String output = "";
+      while (file.available()) {
+        String line = file.readStringUntil('\n');
+        line.trim();
+        if (line.length() == 0) continue;
+        int commaIndex = line.indexOf(',');
+        String name = line.substring(0, commaIndex);
+        String count = line.substring(commaIndex + 1);
+
+        output += "<tr>";
+        output += "<td><a href='/part?name=" + name + "'>" + name + "</a></td>";
+        output += "<td><span class='stock'>" + count + "</span></td>";
+        output += "<td><a href='/pdfs/" + name + ".pdf'>View</a></td>";
+        output += "</tr>";
+      }
+      file.close();
+      return output;
+    }
+    // If var is %PART_NAME% handles requests for specific part names on the parts html page
+    if (var == "PART_NAME") {
+      return currentPartName;
+    }
+    // If var is %PART_COUNT% handles requests for the count of parts on the parts html page
+    if (var == "PART_COUNT") {
+      loadPartCache(currentPartName);
+      return cachedCount;
+    }
+    // Same as above two but for the photo
+    if (var == "PART_PHOTO") {
+      return "/photos/" + currentPartName + ".jpg";
+    }
+    // same as above but for pdf
+    if (var == "PART_PDF") {
+      return "/pdfs/" + currentPartName + ".pdf";
+    }
+    return String();
+  }
+
+
+  // SD Card initalization
+  void initSDCard() {
+    SPI.begin(18, 19, 23, 5);  // SCK, MISO, MOSI, CS
+    if (!SD.begin(5, SPI, 8000000)) {
+      Serial.println("Card Mount Failed");
+      return;
+    }
+    uint8_t cardType = SD.cardType();
+    if (cardType == CARD_NONE) {
+      Serial.println("No SD card attached");
+      return;
+    }
+    Serial.println("SD Card initialized");
+  }
+
+
+  // Start pages including pages that send data
+  void initRoutes() {
+
+    server = new AsyncWebServer(80);
+    // index page
+    server->on("/", HTTP_GET, [](AsyncWebServerRequest* request) {
+      request->send(SD, "/htmls/index.html", "text/html", false, processor);
+    });
+
+    // part specific page
+    server->on("/part", HTTP_GET, [](AsyncWebServerRequest* request) {
+      if (request->hasParam("name")) {
+        currentPartName = request->getParam("name")->value();
+      }
+      request->send(SD, "/htmls/part.html", "text/html", false, processor);
+    });
+
+    // admin page
+    server->on("/admin", HTTP_GET, [](AsyncWebServerRequest* request) {
+      request->send(SD, "/htmls/admin.html", "text/html", false, processor);
+    });
+
+    // add part — appends to CSV and saves uploaded files
+    server->on("/addpart", HTTP_POST, [](AsyncWebServerRequest* request) {
+        // runs after uploads complete
+        if (request->hasParam("name", true) && request->hasParam("count", true)) {
+          String name = request->getParam("name", true)->value();
+          String count = request->getParam("count", true)->value();
+
+          // append new line to CSV
+          File csv = SD.open("/data/parts.csv", FILE_APPEND);
+          if (csv) {
+            csv.println(name + "," + count);
+            csv.close();
+          }
+          request->redirect("/?status=success");
+        } else {
+          request->send(400, "text/plain", "Missing name or count");
+        }
+      },
+      [](AsyncWebServerRequest* request, String filename, size_t index, uint8_t* data, size_t len, bool final) {
+        // runs as files come in
+        if (!request->hasParam("name", true)) return;
+        String partName = request->getParam("name", true)->value();
+
+        if (filename.endsWith(".pdf")) {
+          String path = "/pdfs/" + partName + ".pdf";
+          if (index == 0) request->_tempFile = SD.open(path, FILE_WRITE);
+          if (request->_tempFile) request->_tempFile.write(data, len);
+          if (final) request->_tempFile.close();
+        }
+        if (filename.endsWith(".jpg")) {
+          String path = "/photos/" + partName + ".jpg";
+          if (index == 0) request->_tempFile = SD.open(path, FILE_WRITE);
+          if (request->_tempFile) request->_tempFile.write(data, len);
+          if (final) request->_tempFile.close();
+        }
+      });
+
+    server->on("/deletepart", HTTP_POST, [](AsyncWebServerRequest* request) {
+      if (request->hasParam("name", true)) {
+        String nameToDelete = request->getParam("name", true)->value();
+
+        // read existing csv
+        File csv = SD.open("/data/parts.csv", "r");
+        if (!csv) {
+          request->send(500, "text/plain", "Could not open CSV");
+          return;
+        }
+
+        // build a new string with every line EXCEPT the one to delete
+        String newCSV = "";
+        while (csv.available()) {
+          String line = csv.readStringUntil('\n');
+          line.trim();
+          if (line.length() == 0) continue;
+          int commaIndex = line.indexOf(',');
+          String name = line.substring(0, commaIndex);
+          if (name != nameToDelete) {
+            newCSV += line + "\n";
+          } else {
+            Serial.println("Deleting: " + name);
+          }
+        }
+        csv.close();
+
+        // overwrite the csv with the new string
+        File out = SD.open("/data/parts.csv", FILE_WRITE);
+        if (!out) {
+          request->send(500, "text/plain", "Could not write CSV");
+          return;
+        }
+        out.print(newCSV);
+        out.close();
+
+        // delete the associated files
+        SD.remove("/pdfs/" + nameToDelete + ".pdf");
+        SD.remove("/photos/" + nameToDelete + ".jpg");
+
+        request->send(200, "text/plain", "Part deleted");
+      } else {
+        request->send(400, "text/plain", "Missing name");
+      }
+    });
+
+    server->on("/updatecount", HTTP_POST, [](AsyncWebServerRequest* request) {
+      if (request->hasParam("name", true) && request->hasParam("count", true)) {
+        String name = request->getParam("name", true)->value();
+        String newCount = request->getParam("count", true)->value();
+
+        // read csv into memory
+        File csv = SD.open("/data/parts.csv", "r");
+        String newCSV = "";
+        while (csv.available()) {
+          String line = csv.readStringUntil('\n');
+          line.trim();
+          if (line.length() == 0) continue;
+          int commaIndex = line.indexOf(',');
+          String lineName = line.substring(0, commaIndex);
+          if (lineName == name) {
+            // replace this line with updated count
+            newCSV += name + "," + newCount + "\n";
+          } else {
+            newCSV += line + "\n";
+          }
+        }
+        csv.close();
+
+        // write back
+        File out = SD.open("/data/parts.csv", FILE_WRITE);
+        out.print(newCSV);
+        out.close();
+
+        request->send(200, "text/plain", "OK");
+      }
+    });
+
+    server->on("/setwifi", HTTP_POST, [](AsyncWebServerRequest* request) {
+      if (request->hasParam("ssid", true) && request->hasParam("password", true)) {
+        wifiSSID = request->getParam("ssid", true)->value();
+        wifiPass = request->getParam("password", true)->value();
+        wifiRequested = true;
+        request->send(200, "text/plain", "Connecting to WiFi...");
+      }
+    });
+
+    server->on("/setap", HTTP_POST, [](AsyncWebServerRequest* request) {
+      apRequested = true;
+      request->send(200, "text/plain", "Switching to AP mode...");
+    });
+
+    server->on("/style.css", HTTP_GET, [](AsyncWebServerRequest* request) {
+      request->send(200, "text/css", cssCache);
+    });
+
+    // serve static files (css, photos, pdfs)
+    server->serveStatic("/pdfs/", SD, "/pdfs/");
+    server->serveStatic("/photos/", SD, "/photos/");
+  }
+
+  //For AP mode
+  void initAP() {
+    MDNS.end();
+    WiFi.mode(WIFI_AP);
+    WiFi.softAPConfig(apIP, apIP, netMsk);
+    WiFi.softAP(apssid, appassword);
+    dnsServer.start(53, "inventory.io", apIP);
+    if (!serverStarted) {
+      server->begin();
+      serverStarted = true;
+      Serial.println("Server started");
+    }
+  }
+
+  // For Wifi mode
+  void initWiFi() {
+    WiFi.softAPdisconnect(true);
+    dnsServer.stop();
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(wifiSSID.c_str(), wifiPass.c_str());
+    int attempts = 0;
+    while (WiFi.status() != WL_CONNECTED && attempts < 20) {
+      delay(1000);
+      attempts++;
+    }
+    if (WiFi.status() != WL_CONNECTED) {
+      apRequested = true;
+      return;
+    }
+    if (!serverStarted) {
+      server->begin();
+      serverStarted = true;
+    }
+    Serial.println(WiFi.localIP());
+    if (MDNS.begin("inventory")) {
+      Serial.println("mDNS started — access at http://inventory.local");
+    }
+  }
+
+  void setup() {
+
+    Serial.begin(115200);
     delay(1000);
+
+    //use sd
+    initSDCard();
+
+    delay(500);
+
+    loadFileCache();
+
+    // Setup pages
+    initRoutes();
+
+    // ALWAYS BOOT INTO AP MODE FIRST
+    //initalize ap
+    initAP();
+    Serial.println("AP done");
   }
-  Serial.println(WiFi.localIP());
-}
 
-void initAP(){
+  void loop() {
+    dnsServer.processNextRequest();
 
-  WiFi.mode(WIFI_AP);
-  WiFi.softAPConfig(apIP, apIP, netMsk);
-  WiFi.softAP(ssid, password);
+    if (wifiRequested) {
+      // Will fall back if wifi is not contacted
+      wifiRequested = false;
+      initWiFi();
+    }
 
-  dnsServer.start(53, "*", apIP);
-  server.on("/", HTTP_GET, [](AsyncWebServerRequest* request) {
-    request->send(SD, "/htmls/index.html", "text/html");
-  });
-  server.serveStatic("/", SD, "/htmls/");
-  server.begin();
-
-}
-
-void setup() {
-
-  Serial.begin(115200);
-  Serial.println("\n[*] Creating AP");
-  
-  //use sd
-  initSDCard();
-
-  //initalize ap
-  initAP();
-}
-
-void loop() {
-  dnsServer.processNextRequest();
-}
+    if (apRequested) {
+      apRequested = false;
+      initAP();
+    }
+  }
