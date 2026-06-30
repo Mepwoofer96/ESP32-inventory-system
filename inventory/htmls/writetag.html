@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>body { visibility: hidden; background: #0d0d0d; margin: 0; }</style>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <h1>Tap phone to NFC tag</h1>
+  <p id="status">Hold your phone near the tag...</p>
+  <button onclick="window.location.href='/admin'">Done / Back to Admin</button>
+
+  <script>
+    document.body.style.visibility = 'visible';
+
+    const partName = "%PART_NAME%";
+    const tagUrl = window.location.origin + "/part?name=" + encodeURIComponent(partName);
+
+    async function writeTag() {
+      const statusEl = document.getElementById('status');
+      if (!('NDEFReader' in window)) {
+        statusEl.innerText = "Web NFC not supported. Use Chrome on Android.";
+        return;
+      }
+      try {
+        const ndef = new NDEFReader();
+        await ndef.write({ records: [{ recordType: "url", data: tagUrl }] });
+        statusEl.innerText = "Tag written successfully!";
+      } catch (err) {
+        statusEl.innerText = "Error writing tag: " + err;
+      }
+    }
+
+    writeTag();
+  </script>
+</body>
+</html>
