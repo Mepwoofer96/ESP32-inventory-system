@@ -1,13 +1,35 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <style>body { visibility: hidden; background: #0d0d0d; margin: 0; }</style>
-  <link rel="stylesheet" href="/style.css">
+  <title>NFC — Inventory</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" type="text/css" href="style.css">
+    <style>
+    body { visibility: hidden; background: #0d0d0d; margin: 0; }
+  </style>
+  
+  <!-- Reveal the page once CSS is loaded -->
+  <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      document.body.style.visibility = 'visible';
+    });
+  </script>
 </head>
 <body>
+    <div class="topbar">
+    <span class="topbar-brand">// Light it Up &nbsp;· &nbsp;Inventory</span>
+    <nav class="topbar-nav">
+    </nav>
+  </div>
+
+  <div class="page">
+    <h1>NFC <span>Panel</span></h1>
+<div class="form-card">
   <h1>Tap phone to NFC tag</h1>
   <p id="status">Hold your phone near the tag...</p>
-  <button onclick="window.location.href='/admin'">Done / Back to Admin</button>
+  <button class="btn btn-primary" onclick="window.location.href='/admin'">Done / Back to Admin</button>
 
   <script>
     document.body.style.visibility = 'visible';
@@ -32,5 +54,15 @@
 
     writeTag();
   </script>
+
+</div>
+<div class="form-card">
+  <h2>If unable to write NFC from phone</h2>
+  <form action="/internalnfc" method="POST">
+    <div class="field">
+      <button class="btn btn-primary" type="submit">Write from Onboard NFC</button>
+    </div>
+  </form>
+</div>
 </body>
 </html>

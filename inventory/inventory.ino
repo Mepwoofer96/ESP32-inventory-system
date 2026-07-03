@@ -7,7 +7,7 @@
 //
 //  Hardware used
 //
-//  NFC tags, ESP32 microcontroller, HW-125 SD Card Adapter
+//  NFC tags, ESP32 microcontroller, HW-125 SD Card Adapter, Possibly NFC writer
 //
 //
 //  How it works:
@@ -57,6 +57,14 @@ String cachedName = "";
 String cachedCount = "";
 String cssCache = "";
 
+
+String escapePDFText(String s) {
+  s.replace("\\", "\\\\");
+  s.replace("(", "\\(");
+  s.replace(")", "\\)");
+  return s;
+}
+
 void loadFileCache() {
   File f = SD.open("/htmls/style.css", "r");
   if (f) {
@@ -100,37 +108,27 @@ String processor(const String& var) {
       line.trim();
       if (line.length() == 0) continue;
       int commaIndex = line.indexOf(',');
-      String name = line.substring(0, commaIndex);
-      String count = line.substring(commaIndex + 1);
-
-      output += "<tr>";
-      output += "<td><a href='/part?name=" + name + "'>" + name + "</a></td>";
-      output += "<td><span class='stock'>" + count + "</span></td>";
-      output += "<td><a href='/pdfs/" + name + ".pdf'>View</a></td>";
-      output += "</tr>";
+      String name = line.subs… {
+        return currentPartName;
+      }
+      // If var is %PART_COUNT% handles requests for the count of parts on the parts html page
+      if (var == "PART_COUNT") {
+        loadPartCache(currentPartName);
+        return cachedCount;
+      }
+      // Same as above two but for the photo
+      if (var == "PART_PHOTO") {
+        return "/photos/" + currentPartName + ".jpg";
+      }
+      // same as above but for pdf
+      if (var == "PART_PDF") {
+        return "/pdfs/" + currentPartName + ".pdf";
+      }
+      return String();
     }
-    file.close();
-    return output;
   }
-  // If var is %PART_NAME% handles requests for specific part names on the parts html page
-  if (var == "PART_NAME") {
-    return currentPartName;
-  }
-  // If var is %PART_COUNT% handles requests for the count of parts on the parts html page
-  if (var == "PART_COUNT") {
-    loadPartCache(currentPartName);
-    return cachedCount;
-  }
-  // Same as above two but for the photo
-  if (var == "PART_PHOTO") {
-    return "/photos/" + currentPartName + ".jpg";
-  }
-  // same as above but for pdf
-  if (var == "PART_PDF") {
-    return "/pdfs/" + currentPartName + ".pdf";
-  }
-  return String();
 }
+
 
 
 // SD Card initalization
@@ -171,7 +169,7 @@ void initRoutes() {
     request->send(SD, "/htmls/part.html", "text/html", false, processor);
   });
 
-  // admin page
+  // admin pageString name = currentPartName
   server->on("/admin", HTTP_GET, [](AsyncWebServerRequest* request) {
     if (!request->authenticate(adminUser, adminPass)) {
       return request->requestAuthentication();
@@ -180,24 +178,24 @@ void initRoutes() {
   });
 
   // add part — appends to CSV and saves uploaded files
-server->on("/addpart", HTTP_POST, [](AsyncWebServerRequest* request) {
-    if (!request->authenticate(adminUser, adminPass)) {
+  server->on("/addpart", HTTP_POST, [](AsyncWebServerRequest* request) {
+      if (!request->authenticate(adminUser, adminPass)) {
         return request->requestAuthentication();
-    }
-    if (request->hasParam("name", true) && request->hasParam("count", true)) {
-      String name = request->getParam("name", true)->value();
-      String count = request->getParam("count", true)->value();
-
-      File csv = SD.open("/data/parts.csv", FILE_APPEND);
-      if (csv) {
-        csv.println(name + "," + count);
-        csv.close();
       }
-      request->redirect("/writetag?name=" + name);
-    } else {
-      request->send(400, "text/plain", "Missing name or count");
-    }
-  },
+      if (request->hasParam("name", true) && request->hasParam("count", true)) {
+        String name = request->getParam("name", true)->value();
+        String count = request->getParam("count", true)->value();
+
+        File csv = SD.open("/data/parts.csv", FILE_APPEND);
+        if (csv) {
+          csv.println(name + "," + count);
+          csv.close();
+        }
+        request->redirect("/writetag?name=" + name);
+      } else {
+        request->send(400, "text/plain", "Missing name or count");
+      }
+    },
 
     [](AsyncWebServerRequest* request, String filename, size_t index, uint8_t* data, size_t len, bool final) {
       // runs as files come in
@@ -218,16 +216,16 @@ server->on("/addpart", HTTP_POST, [](AsyncWebServerRequest* request) {
       }
     });
 
-// write nfc tag    
-server->on("/writetag", HTTP_GET, [](AsyncWebServerRequest* request) {
+  // write nfc tag
+  server->on("/writetag", HTTP_GET, [](AsyncWebServerRequest* request) {
     if (!request->authenticate(adminUser, adminPass)) {
-        return request->requestAuthentication();
+      return request->requestAuthentication();
     }
     if (request->hasParam("name")) {
       currentPartName = request->getParam("name")->value();
     }
     request->send(SD, "/htmls/writetag.html", "text/html", false, processor);
-});
+  });
 
   server->on("/deletepart", HTTP_POST, [](AsyncWebServerRequest* request) {
     if (request->hasParam("name", true)) {
@@ -323,6 +321,61 @@ server->on("/writetag", HTTP_GET, [](AsyncWebServerRequest* request) {
 
   server->on("/style.css", HTTP_GET, [](AsyncWebServerRequest* request) {
     request->send(200, "text/css", cssCache);
+  });
+
+  // server->on("/internalnfc"){} //SHOULD CONNECT TO INTERNAL NFC WRITER TO WRITE A TAG
+
+  //generates a PDF report of the parts.csv inventory
+  server->on("/printpdf", HTTP_GET, [](AsyncWebServerRequest* request) {
+    File csv = SD.open("/data/parts.csv", "r");
+    if (!csv) {
+      request->send(404, "text/plain", "No inventory data found");
+      return;
+    }
+
+    String content = "";
+    int y = 730;
+    int lineHeight = 18;
+
+    // Title at the top
+    content += "BT /F1 20 Tf 50 770 Td (Part Number) Tj ET\n";
+    content += "BT /F1 10 Tf 50 750 Td (Count) Tj ET\n";  // simple column label
+
+    while (csv.available()) {
+      String line = csv.readStringUntil('\n');
+      line.trim();
+      if (line.length() == 0) continue;
+
+      int commaIndex = line.indexOf(',');
+      String name = line.substring(0, commaIndex);
+      String count = line.substring(commaIndex + 1);
+
+      String row = escapePDFText(name + "     " + count);
+      content += "BT /F1 12 Tf 50 " + String(y) + " Td (" + row + ") Tj ET\n";
+      y -= lineHeight;
+
+      // basic overflow guard — stop before running off the page
+      if (y < 50) break;
+    }
+    csv.close();
+
+    // --- assemble the PDF ---
+    String pdf = "%PDF-1.4\n";
+    pdf += "1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n";
+    pdf += "2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n";
+    pdf += "3 0 obj<</Type/Page/Parent 2 0 R/Resources<</Font<</F1 5 0 R>>>>/MediaBox[0 0 612 792]/Contents 4 0 R>>endobj\n";
+    pdf += "4 0 obj<</Length " + String(content.length()) + ">>stream\n";
+    pdf += content;
+    pdf += "endstream endobj\n";
+    pdf += "5 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj\n";
+    int xrefStart = pdf.length();
+    pdf += "xref\n0 6\n0000000000 65535 f \n";
+    pdf += "trailer<</Size 6/Root 1 0 R>>\n";
+    pdf += "startxref\n" + String(xrefStart) + "\n%%EOF";
+
+    AsyncWebServerResponse* response = request->beginResponse(200, "application/pdf", pdf);
+    response->addHeader("Content-Disposition", "attachment; filename=inventory.pdf");
+    request->send(response);
   });
 
   // serve static files (css, photos, pdfs)
