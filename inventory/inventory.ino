@@ -16,7 +16,7 @@
 //
 //
 //  Additions
-//  Over the air updates, infinte scalability(done), PDF export(somewhat done), Automatic Renewal (when stock is low)
+//  Over the air updates, infinte scalability(done), PDF export( done), Automatic Renewal (when stock is low)
 //
 //
 //
@@ -39,6 +39,7 @@ const char* fake_hostname = "inventory";
 bool wifiRequested = false;
 bool apRequested = false;
 bool serverStarted = false;
+bool newAdmin = false;
 
 String wifiSSID = "";
 String wifiPass = "";
@@ -158,8 +159,8 @@ void initSDCard() {
 
 // admin stuff
 
-const char* adminUser = "admin";
-const char* adminPass = "password?";
+String adminUser = "admin";
+String adminPass = "password?";
 
 
 // Start pages including pages that send data
@@ -181,7 +182,7 @@ void initRoutes() {
 
   // admin pageString name = currentPartName
   server->on("/admin", HTTP_GET, [](AsyncWebServerRequest* request) {
-    if (!request->authenticate(adminUser, adminPass)) {
+    if (!request->authenticate(adminUser.c_str(), adminPass.c_str())) {
       return request->requestAuthentication();
     }
     request->send(SD, "/htmls/admin.html", "text/html", false, processor);
@@ -189,7 +190,7 @@ void initRoutes() {
 
   // add part — appends to CSV and saves uploaded files
   server->on("/addpart", HTTP_POST, [](AsyncWebServerRequest* request) {
-      if (!request->authenticate(adminUser, adminPass)) {
+      if (!request->authenticate(adminUser.c_str(), adminPass.c_str())) {
         return request->requestAuthentication();
       }
       if (request->hasParam("name", true) && request->hasParam("count", true)) {
@@ -228,7 +229,7 @@ void initRoutes() {
 
   // write nfc tag
   server->on("/writetag", HTTP_GET, [](AsyncWebServerRequest* request) {
-    if (!request->authenticate(adminUser, adminPass)) {
+    if (!request->authenticate(adminUser.c_str(), adminPass.c_str())) {
       return request->requestAuthentication();
     }
     if (request->hasParam("name")) {
@@ -253,7 +254,7 @@ void initRoutes() {
       while (csv.available()) {
         String line = csv.readStringUntil('\n');
         line.trim();
-        if (line.length() == 0) continue;
+        if (line.es so it recognizes "hey, this network has something to say to the user" and pops the sign-in notificationlength() == 0) continue;
         int commaIndex = line.indexOf(',');
         String name = line.substring(0, commaIndex);
         if (name != nameToDelete) {
@@ -336,57 +337,68 @@ void initRoutes() {
   // server->on("/internalnfc"){} //SHOULD CONNECT TO INTERNAL NFC WRITER TO WRITE A TAG
 
   //generates a PDF report of the parts.csv inventory
-  server->on("/printpdf", HTTP_GET, [](AsyncWebServerRequest* request) {
-    File csv = SD.open("/data/parts.csv", "r");
-    if (!csv) {
-      request->send(404, "text/plain", "No inventory data found");
-      return;
-    }
+server->on("/printpdf", HTTP_GET, [](AsyncWebServerRequest* request) {
+  File csv = SD.open("/data/parts.csv", "r");
+  if (!csv) {
+    request->send(404, "text/plain", "No inventory data found");
+    return;
+  }
 
-    String content = "";
-    int y = 730;
-    int lineHeight = 18;
+  int col1X = 50;   // Part Number column
+  int col2X = 320;  // Count column
+  int y = 740;
+  int lineHeight = 20;
 
-    // Title at the top
-    content += "BT /F1 20 Tf 50 770 Td (Part Number) Tj ET\n";
-    content += "BT /F1 10 Tf 50 750 Td (Count) Tj ET\n";  // simple column label
+  String content = "";
 
-    while (csv.available()) {
-      String line = csv.readStringUntil('\n');
-      line.trim();
-      if (line.length() == 0) continue;
+  // Title
+  content += "BT /F2 22 Tf 50 770 Td (Inventory Report) Tj ET\n";
 
-      int commaIndex = line.indexOf(',');
-      String name = line.substring(0, commaIndex);
-      String count = line.substring(commaIndex + 1);
+  // Header row (bold)
+  content += "BT /F2 12 Tf " + String(col1X) + " " + String(y) + " Td (Part Number) Tj ET\n";
+  content += "BT /F2 12 Tf " + String(col2X) + " " + String(y) + " Td (Count) Tj ET\n";
 
-      String row = escapePDFText(name + "     " + count);
-      content += "BT /F1 12 Tf 50 " + String(y) + " Td (" + row + ") Tj ET\n";
-      y -= lineHeight;
+  // Divider line under header
+  y -= 8;
+  content += String(col1X) + " " + String(y) + " m 550 " + String(y) + " l S\n";
+  y -= lineHeight;
 
-      // basic overflow guard — stop before running off the page
-      if (y < 50) break;
-    }
-    csv.close();
+  while (csv.available()) {
+    String line = csv.readStringUntil('\n');
+    line.trim();
+    if (line.length() == 0) continue;
 
-    // --- assemble the PDF ---
-    String pdf = "%PDF-1.4\n";
-    pdf += "1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n";
-    pdf += "2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n";
-    pdf += "3 0 obj<</Type/Page/Parent 2 0 R/Resources<</Font<</F1 5 0 R>>>>/MediaBox[0 0 612 792]/Contents 4 0 R>>endobj\n";
-    pdf += "4 0 obj<</Length " + String(content.length()) + ">>stream\n";
-    pdf += content;
-    pdf += "endstream endobj\n";
-    pdf += "5 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj\n";
-    int xrefStart = pdf.length();
-    pdf += "xref\n0 6\n0000000000 65535 f \n";
-    pdf += "trailer<</Size 6/Root 1 0 R>>\n";
-    pdf += "startxref\n" + String(xrefStart) + "\n%%EOF";
+    int commaIndex = line.indexOf(',');
+    String name = escapePDFText(line.substring(0, commaIndex));
+    String count = escapePDFText(line.substring(commaIndex + 1));
 
-    AsyncWebServerResponse* response = request->beginResponse(200, "application/pdf", pdf);
-    response->addHeader("Content-Disposition", "attachment; filename=inventory.pdf");
-    request->send(response);
-  });
+    content += "BT /F1 12 Tf " + String(col1X) + " " + String(y) + " Td (" + name + ") Tj ET\n";
+    content += "BT /F1 12 Tf " + String(col2X) + " " + String(y) + " Td (" + count + ") Tj ET\n";
+    y -= lineHeight;
+
+    if (y < 50) break;  // stop before running off the page
+  }
+  csv.close();
+
+  // --- assemble the PDF ---
+  String pdf = "%PDF-1.4\n";
+  pdf += "1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n";
+  pdf += "2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n";
+  pdf += "3 0 obj<</Type/Page/Parent 2 0 R/Resources<</Font<</F1 5 0 R/F2 6 0 R>>>>/MediaBox[0 0 612 792]/Contents 4 0 R>>endobj\n";
+  pdf += "4 0 obj<</Length " + String(content.length()) + ">>stream\n";
+  pdf += content;
+  pdf += "endstream endobj\n";
+  pdf += "5 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj\n";
+  pdf += "6 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica-Bold>>endobj\n";
+  int xrefStart = pdf.length();
+  pdf += "xref\n0 7\n0000000000 65535 f \n";
+  pdf += "trailer<</Size 7/Root 1 0 R>>\n";
+  pdf += "startxref\n" + String(xrefStart) + "\n%%EOF";
+
+  AsyncWebServerResponse* response = request->beginResponse(200, "application/pdf", pdf);
+  response->addHeader("Content-Disposition", "attachment; filename=inventory.pdf");
+  request->send(response);
+});
 
   server->on("/setadmin", HTTP_POST, [](AsyncWebServerRequest* request) {
     if (request->hasParam("username", true) && request->hasParam("password", true)) {
@@ -405,10 +417,16 @@ void initRoutes() {
 //For AP mode
 void initAP() {
   MDNS.end();
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_OFF);
+  delay(200);
+
   WiFi.mode(WIFI_AP);
+  delay(100);
   WiFi.softAPConfig(apIP, apIP, netMsk);
   WiFi.softAP(apssid, appassword);
   dnsServer.start(53, "inventory.io", apIP);
+
   if (!serverStarted) {
     server->begin();
     serverStarted = true;
@@ -416,12 +434,21 @@ void initAP() {
   }
 }
 
+
 // For Wifi mode
 void initWiFi() {
-  WiFi.softAPdisconnect(true);
   dnsServer.stop();
+  MDNS.end();
+
+  WiFi.softAPdisconnect(true);
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_OFF);
+  delay(200);  // let the driver fully tear down before switching modes
+
   WiFi.mode(WIFI_STA);
+  delay(100);
   WiFi.begin(wifiSSID.c_str(), wifiPass.c_str());
+
   int attempts = 0;
   while (WiFi.status() != WL_CONNECTED && attempts < 20) {
     delay(1000);
