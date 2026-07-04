@@ -16,7 +16,7 @@
 //
 //
 //  Additions
-//  Over the air updates, infinte scalability, PDF export, Automatic Renewal (when stock is low)
+//  Over the air updates, infinte scalability(done), PDF export(somewhat done), Automatic Renewal (when stock is low)
 //
 //
 //
@@ -108,27 +108,37 @@ String processor(const String& var) {
       line.trim();
       if (line.length() == 0) continue;
       int commaIndex = line.indexOf(',');
-      String name = line.subs… {
-        return currentPartName;
-      }
-      // If var is %PART_COUNT% handles requests for the count of parts on the parts html page
-      if (var == "PART_COUNT") {
-        loadPartCache(currentPartName);
-        return cachedCount;
-      }
-      // Same as above two but for the photo
-      if (var == "PART_PHOTO") {
-        return "/photos/" + currentPartName + ".jpg";
-      }
-      // same as above but for pdf
-      if (var == "PART_PDF") {
-        return "/pdfs/" + currentPartName + ".pdf";
-      }
-      return String();
-    }
-  }
-}
+      String name = line.substring(0, commaIndex);
+      String count = line.substring(commaIndex + 1);
 
+      output += "<tr>";
+      output += "<td><a href='/part?name=" + name + "'>" + name + "</a></td>";
+      output += "<td><span class='stock'>" + count + "</span></td>";
+      output += "<td><a href='/pdfs/" + name + ".pdf'>View</a></td>";
+      output += "</tr>";
+    }
+    file.close();
+    return output;
+  }
+  // If var is %PART_NAME% handles requests for specific part names on the parts html page
+  if (var == "PART_NAME") {
+    return currentPartName;
+  }
+  // If var is %PART_COUNT% handles requests for the count of parts on the parts html page
+  if (var == "PART_COUNT") {
+    loadPartCache(currentPartName);
+    return cachedCount;
+  }
+  // Same as above two but for the photo
+  if (var == "PART_PHOTO") {
+    return "/photos/" + currentPartName + ".jpg";
+  }
+  // same as above but for pdf
+  if (var == "PART_PDF") {
+    return "/pdfs/" + currentPartName + ".pdf";
+  }
+  return String();
+}
 
 
 // SD Card initalization
@@ -376,6 +386,15 @@ void initRoutes() {
     AsyncWebServerResponse* response = request->beginResponse(200, "application/pdf", pdf);
     response->addHeader("Content-Disposition", "attachment; filename=inventory.pdf");
     request->send(response);
+  });
+
+  server->on("/setadmin", HTTP_POST, [](AsyncWebServerRequest* request) {
+    if (request->hasParam("username", true) && request->hasParam("password", true)) {
+      adminUser = request->getParam("username", true)->value();
+      adminPass = request->getParam("password", true)->value();
+      newAdmin = true;
+      request->send(200, "text/plain", "Changed Admin User (REMEMBER INFO will reset on power off)");
+    }
   });
 
   // serve static files (css, photos, pdfs)
