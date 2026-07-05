@@ -70,6 +70,7 @@ String cachedCount = "";
 String cssCache = "";
 
 // --- Firmware (.bin) update — now returns bool so callers know if it succeeded ---
+// --- Firmware (.bin) update ---
 bool performFirmwareUpdate() {
   WiFiClientSecure client;
   client.setInsecure();
@@ -82,17 +83,18 @@ bool performFirmwareUpdate() {
   if (httpCode != HTTP_CODE_OK) {
     Serial.println("Firmware fetch failed, code: " + String(httpCode));
     http.end();
+    client.stop();
     return false;
   }
 
   int contentLength = http.getSize();
   Serial.println("Firmware size reported: " + String(contentLength));
-
   Serial.println("Free sketch space (OTA partition): " + String(ESP.getFreeSketchSpace()));
 
   if (contentLength <= 0 || !Update.begin(contentLength)) {
     Serial.println("Not enough space, or bad content length: " + String(contentLength));
     http.end();
+    client.stop();
     return false;
   }
 
@@ -127,23 +129,21 @@ bool performFirmwareUpdate() {
     Serial.println("Update successful, rebooting...");
     success = true;
   } else {
-    Update.abort(); // reset the singleton so the next attempt can actually start
+    Update.abort();
     Serial.println("Update failed: " + String(Update.getError()));
   }
 
   http.end();
+  client.stop();
 
   if (success) {
-    ESP.restart(); // never returns
+    ESP.restart();
   }
   return false;
 }
 
-// --- Asset (HTML/CSS) update — unchanged from last version, included for completeness ---
-bool downloadFileToSD(const char* url, const char* sdPath) {
-  WiFiClientSecure client;
-  client.setInsecure();
-
+// --- Asset (HTML/CSS) update — now takes a shared client instead of making its own ---
+bool downloadFileToSD(WiFiClientSecure& client, const char* url, const char* sdPath) {
   HTTPClient http;
   http.begin(client, url);
   int httpCode = http.GET();
@@ -184,7 +184,7 @@ bool downloadFileToSD(const char* url, const char* sdPath) {
   return true;
 }
 
-// --- Overall OTA check: version compare, retrying firmware, heap-gated asset sync ---
+// --- Overall OTA check ---
 void performOTACheck() {
   Serial.printf("Free heap at OTA start: %d, largest free block: %d\n",
                 ESP.getFreeHeap(), ESP.getMaxAllocHeap());
@@ -193,10 +193,10 @@ void performOTACheck() {
   bool versionCheckOK = false;
 
   for (int attempt = 1; attempt <= 2 && !versionCheckOK; attempt++) {
-    WiFiClientSecure client;
-    client.setInsecure();
+    WiFiClientSecure versionClient;
+    versionClient.setInsecure();
     HTTPClient http;
-    http.begin(client, firmwareVersionURL);
+    http.begin(versionClient, firmwareVersionURL);
     int code = http.GET();
 
     if (code == HTTP_CODE_OK) {
@@ -209,6 +209,7 @@ void performOTACheck() {
       if (attempt < 2) delay(1500);
     }
     http.end();
+    versionClient.stop();
   }
 
   bool firmwareAttempted = false;
@@ -233,12 +234,17 @@ void performOTACheck() {
     return;
   }
 
-  downloadFileToSD("https://raw.githubusercontent.com/Mepwoofer96/ESP32-inventory-system/main/inventory/htmls/admin.html", "/htmls/admin.html");
-  delay(500);
-  downloadFileToSD("https://raw.githubusercontent.com/Mepwoofer96/ESP32-inventory-system/main/inventory/htmls/style.css", "/htmls/style.css");
-  delay(500);
-  downloadFileToSD("https://raw.githubusercontent.com/Mepwoofer96/ESP32-inventory-system/main/inventory/htmls/index.html", "/htmls/index.html");
+  // Shared client reused across all three asset downloads
+  WiFiClientSecure assetClient;
+  assetClient.setInsecure();
 
+  downloadFileToSD(assetClient, "https://raw.githubusercontent.com/Mepwoofer96/ESP32-inventory-system/main/inventory/htmls/admin.html", "/htmls/admin.html");
+  delay(500);
+  downloadFileToSD(assetClient, "https://raw.githubusercontent.com/Mepwoofer96/ESP32-inventory-system/main/inventory/htmls/style.css", "/htmls/style.css");
+  delay(500);
+  downloadFileToSD(assetClient, "https://raw.githubusercontent.com/Mepwoofer96/ESP32-inventory-system/main/inventory/htmls/index.html", "/htmls/index.html");
+
+  assetClient.stop();
   loadFileCache();
 }
 
