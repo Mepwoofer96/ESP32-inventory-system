@@ -31,6 +31,16 @@
 #include "SD.h"
 #include "SPI.h"
 
+//OTA updates
+#include <HTTPClient.h>
+#include <WiFiClientSecure.h>
+#include <Update.h>
+
+const char* firmwareVersionURL = "https://raw.githubusercontent.com//Mepwoofer96/ESP32-inventory-system/main/version.txt";
+const char* firmwareBinURL = "https://raw.githubusercontent.com/Mepwoofer96/ESP32-inventory-system/main/inventory/inventory.ino.bin";
+const char* currentFirmwareVersion = "0.33.1";  
+
+// Wifi and AP settings
 
 const char* apssid = "Inventory_ESP";
 const char* appassword = "Password?";
@@ -57,6 +67,57 @@ String currentPartName = "";
 String cachedName = "";
 String cachedCount = "";
 String cssCache = "";
+
+
+// --- Asset (HTML/CSS) update ---
+bool downloadFileToSD(const char* url, const char* sdPath) {
+  WiFiClientSecure client;
+  client.setInsecure();  // skip cert validation — fine for raw.githubusercontent.com, see note below
+
+  HTTPClient http;
+  http.begin(client, url);
+  int httpCode = http.GET();
+  if (httpCode != HTTP_CODE_OK) {
+    Serial.println("Download failed: " + String(httpCode));
+    http.end();
+    return false;
+  }
+
+  File file = SD.open(sdPath, FILE_WRITE);
+  if (!file) {
+    http.end();
+    return false;
+  }
+  http.writeToStream(&file);
+  file.close();
+  http.end();
+  return true;
+}
+
+// --- Firmware (.bin) update ---
+void performFirmwareUpdate() {
+  WiFiClientSecure client;
+  client.setInsecure();
+
+  HTTPClient http;
+  http.begin(client, firmwareBinURL);
+  int httpCode = http.GET();
+
+  if (httpCode == HTTP_CODE_OK) {
+    int contentLength = http.getSize();
+    if (contentLength > 0 && Update.begin(contentLength)) {
+      WiFiClient* stream = http.getStreamPtr();
+      size_t written = Update.writeStream(*stream);
+      if (written == contentLength && Update.end()) {
+        Serial.println("Update successful, rebooting...");
+        ESP.restart();
+      } else {
+        Serial.println("Update failed: " + String(Update.getError()));
+      }
+    }
+  }
+  http.end();
+}
 
 
 String escapePDFText(String s) {
@@ -239,7 +300,7 @@ void initRoutes() {
     request->send(SD, "/htmls/writetag.html", "text/html", false, processor);
   });
 
- server->on("/deletepart", HTTP_POST, [](AsyncWebServerRequest* request) {
+  server->on("/deletepart", HTTP_POST, [](AsyncWebServerRequest* request) {
     if (request->hasParam("name", true)) {
       String nameToDelete = request->getParam("name", true)->value();
 
@@ -431,9 +492,46 @@ void initRoutes() {
     request->redirect("http://192.168.4.1/");
   });
 
-  // Catch-all: any other unknown path also bounces to your index
+  // Catch-all: any other unknown path also bounces to index
   server->onNotFound([](AsyncWebServerRequest* request) {
     request->redirect("http://192.168.4.1/");
+  });
+
+  // UPDATE STUFF
+  // Route to trigger a check + update, admin-gated
+  server->on("/checkupdate", HTTP_POST, [](AsyncWebServerRequest* request) {
+    if (!request->authenticate(adminUser.c_str(), adminPass.c_str())) {
+      return request->requestAuthentication();
+    }
+    request->send(200, "text/plain", "Checking for updates...");
+
+    // Pull remote version string and compare
+    WiFiClientSecure client;
+    client.setInsecure();
+    HTTPClient http;
+    http.begin(client, firmwareVersionURL);
+    int code = http.GET();
+    if (code == HTTP_CODE_OK) {
+      String remoteVersion = http.getString();
+      remoteVersion.trim();
+      if (remoteVersion != currentFirmwareVersion) {
+        performFirmwareUpdate();
+      }
+    }
+    http.end();
+
+    // Also refresh HTML/CSS assets regardless of firmware version
+    downloadFileToSD("https://raw.githubusercontent.com/Mepwoofer96/ESP32-inventory-system/main/inventory/htmls/admin.html", "/htmls/admin.html");
+    downloadFileToSD("https://raw.githubusercontent.com/Mepwoofer96/ESP32-inventory-system/main/inventory/htmls/style.css", "/htmls/style.css");
+    downloadFileToSD("https://raw.githubusercontent.com/Mepwoofer96/ESP32-inventory-system/main/inventory/htmls/index.html", "/htmls/index.html");
+
+    loadFileCache();  // refresh your in-RAM CSS cache after replacing the file
+  });
+
+  //check for online
+  server->on("/wifistatus", HTTP_GET, [](AsyncWebServerRequest* request) {
+    bool online = (WiFi.getMode() == WIFI_STA && WiFi.status() == WL_CONNECTED);
+    request->send(200, "text/plain", online ? "online" : "offline");
   });
 }
 

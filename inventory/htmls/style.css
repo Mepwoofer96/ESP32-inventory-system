@@ -389,3 +389,11 @@ td a:hover {
     padding: 1.5rem 1rem;
   }
 }
+
+.warning-box {
+  background: #fdecea;
+  color: #b3261e;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  font-size: 0.9rem;
+}

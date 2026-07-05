@@ -130,6 +130,49 @@
   </form>
 </div>
 
+<div class="form-card">
+  <h2>Check For Update</h2>
+  <div id="offline-warning" class="warning-box" style="display:none; margin-bottom: 0.75rem;">
+    Connect to the internet first
+  </div>
+  <form action="/checkupdate" method="GET">
+    <div class="field">
+      <button id="update-btn" class="btn btn-danger" type="submit" disabled>Check For Update</button>
+    </div>
+  </form>
+</div>
+
+<script>
+async function checkWifiStatus() {
+  const btn = document.getElementById('update-btn');
+  const warning = document.getElementById('offline-warning');
+  try {
+    const res = await fetch('/wifistatus');
+    const status = await res.text();
+    if (status === 'online') {
+      btn.classList.remove('btn-danger');
+      btn.classList.add('btn-primary');
+      btn.disabled = false;
+      warning.style.display = 'none';
+    } else {
+      btn.classList.remove('btn-primary');
+      btn.classList.add('btn-danger');
+      btn.disabled = true;
+      warning.style.display = 'block';
+    }
+  } catch (e) {
+    // request itself failed — treat as offline
+    btn.classList.remove('btn-primary');
+    btn.classList.add('btn-danger');
+    btn.disabled = true;
+    warning.style.display = 'block';
+  }
+}
+
+checkWifiStatus();
+setInterval(checkWifiStatus, 5000); // recheck every 5 seconds
+</script>
+
 
   </div>  
 </body>
