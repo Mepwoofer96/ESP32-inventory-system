@@ -38,7 +38,7 @@
 
 const char* firmwareVersionURL = "https://raw.githubusercontent.com/Mepwoofer96/ESP32-inventory-system/main/version.txt";
 const char* firmwareBinURL = "https://raw.githubusercontent.com/Mepwoofer96/ESP32-inventory-system/main/inventory/inventory.ino.bin";
-const char* currentFirmwareVersion = "0.33.1";
+const char* currentFirmwareVersion = "0.37.1";
 bool otaCheckRequested = false;
 
 // Wifi and AP settings
@@ -63,43 +63,86 @@ DNSServer dnsServer;
 IPAddress apIP(192, 168, 4, 1);
 IPAddress netMsk(255, 255, 255, 0);
 
-// For getting the correcct part when asked on html
+// For getting the correct part when asked on html
 String currentPartName = "";
 String cachedName = "";
 String cachedCount = "";
 String cssCache = "";
 
-void performOTACheck() {
+// --- Firmware (.bin) update — now returns bool so callers know if it succeeded ---
+bool performFirmwareUpdate() {
   WiFiClientSecure client;
   client.setInsecure();
+
   HTTPClient http;
-  http.begin(client, firmwareVersionURL);
-  int code = http.GET();
-  if (code == HTTP_CODE_OK) {
-    String remoteVersion = http.getString();
-    remoteVersion.trim();
-    Serial.println("Remote version: " + remoteVersion);
-    if (remoteVersion != currentFirmwareVersion) {
-      performFirmwareUpdate();
-    } else {
-      Serial.println("Already up to date");
-    }
-  } else {
-    Serial.println("Version check failed, code: " + String(code));
+  http.begin(client, firmwareBinURL);
+  http.setTimeout(20000);
+  int httpCode = http.GET();
+
+  if (httpCode != HTTP_CODE_OK) {
+    Serial.println("Firmware fetch failed, code: " + String(httpCode));
+    http.end();
+    return false;
   }
+
+  int contentLength = http.getSize();
+  Serial.println("Firmware size reported: " + String(contentLength));
+
+  Serial.println("Free sketch space (OTA partition): " + String(ESP.getFreeSketchSpace()));
+
+  if (contentLength <= 0 || !Update.begin(contentLength)) {
+    Serial.println("Not enough space, or bad content length: " + String(contentLength));
+    http.end();
+    return false;
+  }
+
+  WiFiClient* stream = http.getStreamPtr();
+  uint8_t buff[1024];
+  size_t totalWritten = 0;
+  unsigned long lastDataTime = millis();
+
+  while (http.connected() && (totalWritten < (size_t)contentLength)) {
+    size_t availableBytes = stream->available();
+    if (availableBytes > 0) {
+      size_t toRead = min(availableBytes, sizeof(buff));
+      int bytesRead = stream->readBytes(buff, toRead);
+      if (bytesRead > 0) {
+        size_t written = Update.write(buff, bytesRead);
+        totalWritten += written;
+        lastDataTime = millis();
+      }
+    } else {
+      if (millis() - lastDataTime > 10000) {
+        Serial.println("Stream stalled, aborting");
+        break;
+      }
+      delay(1);
+    }
+  }
+
+  Serial.println("Bytes written: " + String(totalWritten) + " / " + String(contentLength));
+
+  bool success = false;
+  if (totalWritten == (size_t)contentLength && Update.end()) {
+    Serial.println("Update successful, rebooting...");
+    success = true;
+  } else {
+    Update.abort(); // reset the singleton so the next attempt can actually start
+    Serial.println("Update failed: " + String(Update.getError()));
+  }
+
   http.end();
 
-  downloadFileToSD("https://raw.githubusercontent.com/Mepwoofer96/ESP32-inventory-system/main/inventory/htmls/admin.html", "/htmls/admin.html");
-  downloadFileToSD("https://raw.githubusercontent.com/Mepwoofer96/ESP32-inventory-system/main/inventory/htmls/style.css", "/htmls/style.css");
-  downloadFileToSD("https://raw.githubusercontent.com/Mepwoofer96/ESP32-inventory-system/main/inventory/htmls/index.html", "/htmls/index.html");
-
-  loadFileCache();
+  if (success) {
+    ESP.restart(); // never returns
+  }
+  return false;
 }
 
-// --- Asset (HTML/CSS) update ---
+// --- Asset (HTML/CSS) update — unchanged from last version, included for completeness ---
 bool downloadFileToSD(const char* url, const char* sdPath) {
   WiFiClientSecure client;
-  client.setInsecure();  // skip cert validation — fine for raw.githubusercontent.com, see note below
+  client.setInsecure();
 
   HTTPClient http;
   http.begin(client, url);
@@ -110,42 +153,94 @@ bool downloadFileToSD(const char* url, const char* sdPath) {
     return false;
   }
 
-  File file = SD.open(sdPath, FILE_WRITE);
+  int contentLength = http.getSize();
+  String tempPath = String(sdPath) + ".tmp";
+
+  File file = SD.open(tempPath, FILE_WRITE);
   if (!file) {
     http.end();
     return false;
   }
-  http.writeToStream(&file);
+
+  int written = http.writeToStream(&file);
   file.close();
   http.end();
+
+  if (written < 0) {
+    Serial.println("Download error (" + String(written) + "), keeping old " + String(sdPath));
+    SD.remove(tempPath);
+    return false;
+  }
+
+  if (contentLength > 0 && written != contentLength) {
+    Serial.println("Download incomplete (" + String(written) + "/" + String(contentLength) + "), keeping old " + String(sdPath));
+    SD.remove(tempPath);
+    return false;
+  }
+
+  SD.remove(sdPath);
+  SD.rename(tempPath, sdPath);
+  Serial.println("Updated: " + String(sdPath));
   return true;
 }
 
-// --- Firmware (.bin) update ---
-void performFirmwareUpdate() {
-  WiFiClientSecure client;
-  client.setInsecure();
+// --- Overall OTA check: version compare, retrying firmware, heap-gated asset sync ---
+void performOTACheck() {
+  Serial.printf("Free heap at OTA start: %d, largest free block: %d\n",
+                ESP.getFreeHeap(), ESP.getMaxAllocHeap());
 
-  HTTPClient http;
-  http.begin(client, firmwareBinURL);
-  int httpCode = http.GET();
+  String remoteVersion = "";
+  bool versionCheckOK = false;
 
-  if (httpCode == HTTP_CODE_OK) {
-    int contentLength = http.getSize();
-    if (contentLength > 0 && Update.begin(contentLength)) {
-      WiFiClient* stream = http.getStreamPtr();
-      size_t written = Update.writeStream(*stream);
-      if (written == contentLength && Update.end()) {
-        Serial.println("Update successful, rebooting...");
-        ESP.restart();
-      } else {
-        Serial.println("Update failed: " + String(Update.getError()));
-      }
+  for (int attempt = 1; attempt <= 2 && !versionCheckOK; attempt++) {
+    WiFiClientSecure client;
+    client.setInsecure();
+    HTTPClient http;
+    http.begin(client, firmwareVersionURL);
+    int code = http.GET();
+
+    if (code == HTTP_CODE_OK) {
+      remoteVersion = http.getString();
+      remoteVersion.trim();
+      versionCheckOK = true;
+      Serial.println("Remote version: " + remoteVersion);
+    } else {
+      Serial.println("Version check attempt " + String(attempt) + " failed, code: " + String(code));
+      if (attempt < 2) delay(1500);
     }
+    http.end();
   }
-  http.end();
-}
 
+  bool firmwareAttempted = false;
+
+  if (versionCheckOK && remoteVersion != currentFirmwareVersion) {
+    firmwareAttempted = true;
+    bool success = false;
+    for (int attempt = 1; attempt <= 2 && !success; attempt++) {
+      Serial.println("Firmware attempt " + String(attempt));
+      success = performFirmwareUpdate();
+      if (!success && attempt < 2) delay(2000);
+    }
+    if (!success) {
+      Serial.println("Firmware update failed after retries, continuing without it");
+    }
+  } else if (versionCheckOK) {
+    Serial.println("Already up to date");
+  }
+
+  if (firmwareAttempted && ESP.getMaxAllocHeap() < 40000) {
+    Serial.println("Heap too low after firmware attempt, skipping asset sync this cycle");
+    return;
+  }
+
+  downloadFileToSD("https://raw.githubusercontent.com/Mepwoofer96/ESP32-inventory-system/main/inventory/htmls/admin.html", "/htmls/admin.html");
+  delay(500);
+  downloadFileToSD("https://raw.githubusercontent.com/Mepwoofer96/ESP32-inventory-system/main/inventory/htmls/style.css", "/htmls/style.css");
+  delay(500);
+  downloadFileToSD("https://raw.githubusercontent.com/Mepwoofer96/ESP32-inventory-system/main/inventory/htmls/index.html", "/htmls/index.html");
+
+  loadFileCache();
+}
 
 String escapePDFText(String s) {
   s.replace("\\", "\\\\");
@@ -226,9 +321,9 @@ String processor(const String& var) {
   if (var == "PART_PDF") {
     return "/pdfs/" + currentPartName + ".pdf";
   }
-  
+
   if (var == "FIRMWARE_VERSION") {
-  return String(currentFirmwareVersion);
+    return String(currentFirmwareVersion);
   }
 
   return String();
@@ -634,7 +729,7 @@ void loop() {
   if (apRequested) {
     apRequested = false;
     initAP();
-  } 
+  }
 
   if (otaCheckRequested) {
     otaCheckRequested = false;
