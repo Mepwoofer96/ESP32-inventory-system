@@ -36,9 +36,10 @@
 #include <WiFiClientSecure.h>
 #include <Update.h>
 
-const char* firmwareVersionURL = "https://raw.githubusercontent.com//Mepwoofer96/ESP32-inventory-system/main/version.txt";
+const char* firmwareVersionURL = "https://raw.githubusercontent.com/Mepwoofer96/ESP32-inventory-system/main/version.txt";
 const char* firmwareBinURL = "https://raw.githubusercontent.com/Mepwoofer96/ESP32-inventory-system/main/inventory/inventory.ino.bin";
-const char* currentFirmwareVersion = "0.33.1";  
+const char* currentFirmwareVersion = "0.33.1";
+bool otaCheckRequested = false;
 
 // Wifi and AP settings
 
@@ -68,6 +69,32 @@ String cachedName = "";
 String cachedCount = "";
 String cssCache = "";
 
+void performOTACheck() {
+  WiFiClientSecure client;
+  client.setInsecure();
+  HTTPClient http;
+  http.begin(client, firmwareVersionURL);
+  int code = http.GET();
+  if (code == HTTP_CODE_OK) {
+    String remoteVersion = http.getString();
+    remoteVersion.trim();
+    Serial.println("Remote version: " + remoteVersion);
+    if (remoteVersion != currentFirmwareVersion) {
+      performFirmwareUpdate();
+    } else {
+      Serial.println("Already up to date");
+    }
+  } else {
+    Serial.println("Version check failed, code: " + String(code));
+  }
+  http.end();
+
+  downloadFileToSD("https://raw.githubusercontent.com/Mepwoofer96/ESP32-inventory-system/main/inventory/htmls/admin.html", "/htmls/admin.html");
+  downloadFileToSD("https://raw.githubusercontent.com/Mepwoofer96/ESP32-inventory-system/main/inventory/htmls/style.css", "/htmls/style.css");
+  downloadFileToSD("https://raw.githubusercontent.com/Mepwoofer96/ESP32-inventory-system/main/inventory/htmls/index.html", "/htmls/index.html");
+
+  loadFileCache();
+}
 
 // --- Asset (HTML/CSS) update ---
 bool downloadFileToSD(const char* url, const char* sdPath) {
@@ -249,6 +276,7 @@ void initRoutes() {
     request->send(SD, "/htmls/admin.html", "text/html", false, processor);
   });
 
+  //for dns lying
   // add part — appends to CSV and saves uploaded files
   server->on(
     "/addpart", HTTP_POST, [](AsyncWebServerRequest* request) {
@@ -475,7 +503,7 @@ void initRoutes() {
   // serve static files (css, photos, pdfs)
   server->serveStatic("/pdfs/", SD, "/pdfs/");
   server->serveStatic("/photos/", SD, "/photos/");
-
+  /*
   // Captive portals
   // Android captive portal check
   server->on("/generate_204", HTTP_GET, [](AsyncWebServerRequest* request) {
@@ -496,7 +524,7 @@ void initRoutes() {
   server->onNotFound([](AsyncWebServerRequest* request) {
     request->redirect("http://192.168.4.1/");
   });
-
+ */
   // UPDATE STUFF
   // Route to trigger a check + update, admin-gated
   server->on("/checkupdate", HTTP_POST, [](AsyncWebServerRequest* request) {
@@ -504,28 +532,7 @@ void initRoutes() {
       return request->requestAuthentication();
     }
     request->send(200, "text/plain", "Checking for updates...");
-
-    // Pull remote version string and compare
-    WiFiClientSecure client;
-    client.setInsecure();
-    HTTPClient http;
-    http.begin(client, firmwareVersionURL);
-    int code = http.GET();
-    if (code == HTTP_CODE_OK) {
-      String remoteVersion = http.getString();
-      remoteVersion.trim();
-      if (remoteVersion != currentFirmwareVersion) {
-        performFirmwareUpdate();
-      }
-    }
-    http.end();
-
-    // Also refresh HTML/CSS assets regardless of firmware version
-    downloadFileToSD("https://raw.githubusercontent.com/Mepwoofer96/ESP32-inventory-system/main/inventory/htmls/admin.html", "/htmls/admin.html");
-    downloadFileToSD("https://raw.githubusercontent.com/Mepwoofer96/ESP32-inventory-system/main/inventory/htmls/style.css", "/htmls/style.css");
-    downloadFileToSD("https://raw.githubusercontent.com/Mepwoofer96/ESP32-inventory-system/main/inventory/htmls/index.html", "/htmls/index.html");
-
-    loadFileCache();  // refresh your in-RAM CSS cache after replacing the file
+    otaCheckRequested = true;  // defer the actual work to loop()
   });
 
   //check for online
@@ -622,5 +629,10 @@ void loop() {
   if (apRequested) {
     apRequested = false;
     initAP();
+  } 
+
+  if (otaCheckRequested) {
+    otaCheckRequested = false;
+    performOTACheck();
   }
 }
