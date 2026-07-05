@@ -38,7 +38,7 @@
 
 const char* firmwareVersionURL = "https://raw.githubusercontent.com/Mepwoofer96/ESP32-inventory-system/main/version.txt";
 const char* firmwareBinURL = "https://raw.githubusercontent.com/Mepwoofer96/ESP32-inventory-system/main/inventory/inventory.ino.bin";
-const char* currentFirmwareVersion = "0.37.1";
+const char* currentFirmwareVersion = "0.38.1";
 bool otaCheckRequested = false;
 
 // Wifi and AP settings
@@ -48,6 +48,7 @@ const char* appassword = "Password?";
 const char* fake_hostname = "inventory";
 
 bool wifiRequested = false;
+
 bool apRequested = false;
 bool serverStarted = false;
 bool newAdmin = false;
@@ -68,6 +69,12 @@ String currentPartName = "";
 String cachedName = "";
 String cachedCount = "";
 String cssCache = "";
+
+//captive portal
+
+bool portalAccepted = false;
+
+
 
 // --- Firmware (.bin) update — now returns bool so callers know if it succeeded ---
 // --- Firmware (.bin) update ---
@@ -243,6 +250,8 @@ void performOTACheck() {
   downloadFileToSD(assetClient, "https://raw.githubusercontent.com/Mepwoofer96/ESP32-inventory-system/main/inventory/htmls/style.css", "/htmls/style.css");
   delay(500);
   downloadFileToSD(assetClient, "https://raw.githubusercontent.com/Mepwoofer96/ESP32-inventory-system/main/inventory/htmls/index.html", "/htmls/index.html");
+  delay(500);
+  downloadFileToSD(assetClient, "https://raw.githubusercontent.com/Mepwoofer96/ESP32-inventory-system/main/inventory/htmls/portal_gate.html", "/htmls/portal_gate.html");
 
   assetClient.stop();
   loadFileCache();
@@ -363,7 +372,11 @@ void initRoutes() {
   server = new AsyncWebServer(80);
   // index page
   server->on("/", HTTP_GET, [](AsyncWebServerRequest* request) {
-    request->send(SD, "/htmls/index.html", "text/html", false, processor);
+    if (WiFi.getMode() == WIFI_AP && !portalAccepted) {
+      request->send(SD, "/htmls/portal_gate.html", "text/html", false, processor);
+    } else {
+      request->send(SD, "/htmls/index.html", "text/html", false, processor);
+    }
   });
 
   // part specific page
@@ -513,6 +526,7 @@ void initRoutes() {
     }
   });
 
+
   server->on("/setwifi", HTTP_POST, [](AsyncWebServerRequest* request) {
     if (request->hasParam("ssid", true) && request->hasParam("password", true)) {
       wifiSSID = request->getParam("ssid", true)->value();
@@ -609,28 +623,38 @@ void initRoutes() {
   // serve static files (css, photos, pdfs)
   server->serveStatic("/pdfs/", SD, "/pdfs/");
   server->serveStatic("/photos/", SD, "/photos/");
-  /*
+
   // Captive portals
   // Android captive portal check
   server->on("/generate_204", HTTP_GET, [](AsyncWebServerRequest* request) {
-    request->redirect("http://192.168.4.1/");
+    if (portalAccepted) {
+      request->send(204);  // exactly what Android expects from a validated network
+    } else {
+      request->redirect("http://192.168.4.1/");
+    }
   });
 
-  // iOS/macOS captive portal check
   server->on("/hotspot-detect.html", HTTP_GET, [](AsyncWebServerRequest* request) {
-    request->redirect("http://192.168.4.1/");
+    if (portalAccepted) {
+      request->send(200, "text/html", "<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>");
+    } else {
+      request->redirect("http://192.168.4.1/");
+    }
   });
 
-  // Windows captive portal check
   server->on("/connecttest.txt", HTTP_GET, [](AsyncWebServerRequest* request) {
-    request->redirect("http://192.168.4.1/");
+    if (portalAccepted) {
+      request->send(200, "text/plain", "Microsoft Connect Test");
+    } else {
+      request->redirect("http://192.168.4.1/");
+    }
   });
 
-  // Catch-all: any other unknown path also bounces to index
   server->onNotFound([](AsyncWebServerRequest* request) {
     request->redirect("http://192.168.4.1/");
   });
- */
+
+
   // UPDATE STUFF
   // Route to trigger a check + update, admin-gated
   server->on("/checkupdate", HTTP_POST, [](AsyncWebServerRequest* request) {
@@ -646,6 +670,11 @@ void initRoutes() {
     bool online = (WiFi.getMode() == WIFI_STA && WiFi.status() == WL_CONNECTED);
     request->send(200, "text/plain", online ? "online" : "offline");
   });
+
+  server->on("/enterportal", HTTP_GET, [](AsyncWebServerRequest* request) {
+    portalAccepted = true;
+    request->send(200, "text/html", "<html><body>Connecting...<script>window.location.href='http://192.168.4.1/';</script></body></html>");
+  });
 }
 
 //For AP mode
@@ -660,6 +689,7 @@ void initAP() {
   WiFi.softAPConfig(apIP, apIP, netMsk);
   WiFi.softAP(apssid, appassword);
   dnsServer.start(53, "*", apIP);
+  portalAccepted = false;
 
   if (!serverStarted) {
     server->begin();
