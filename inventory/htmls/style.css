@@ -79,6 +79,7 @@ body {
 }
 
 .nav-btn.active {
+
   border-color: var(--accent-dim);
   color: var(--accent);
   background: rgba(79, 142, 247, 0.08);
@@ -396,4 +397,10 @@ td a:hover {
   padding: 0.5rem 0.75rem;
   border-radius: 6px;
   font-size: 0.9rem;
+}
+
+.version-tag {
+  font-size: 0.75rem;
+  font-weight: normal;
+  color: #888;
 }

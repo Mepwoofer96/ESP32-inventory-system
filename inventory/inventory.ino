@@ -226,6 +226,11 @@ String processor(const String& var) {
   if (var == "PART_PDF") {
     return "/pdfs/" + currentPartName + ".pdf";
   }
+  
+  if (var == "FIRMWARE_VERSION") {
+  return String(currentFirmwareVersion);
+  }
+
   return String();
 }
 
