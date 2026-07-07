@@ -46,7 +46,7 @@
 
 const char* firmwareVersionURL = "https://raw.githubusercontent.com/Mepwoofer96/ESP32-inventory-system/main/version.txt";
 const char* firmwareBinURL = "https://raw.githubusercontent.com/Mepwoofer96/ESP32-inventory-system/main/inventory/inventory.ino.bin";
-const char* currentFirmwareVersion = "0.38.1";
+const char* currentFirmwareVersion = "0.41.1";
 bool otaCheckRequested = false;
 
 // Wifi and AP settings
