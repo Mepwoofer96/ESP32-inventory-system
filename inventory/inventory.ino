@@ -16,7 +16,7 @@
 //
 //
 //  Additions
-//  Over the air updates, infinte scalability(done), PDF export( done), Automatic Renewal (when stock is low)
+//  Over the air updates (done OTAU), infinte scalability(done), PDF export( done), Automatic Renewal (when stock is low) (not sure how to implement yet )
 //
 //
 //
@@ -31,6 +31,14 @@
 #include "SD.h"
 #include "SPI.h"
 
+// RFID card (MFRC522v2 - actively maintained fork with custom-SPI-bus support)
+#include <MFRC522v2.h>
+#include <MFRC522DriverSPI.h>
+#include <MFRC522DriverPinSimple.h>
+#include <MFRC522Debug.h>
+#include <vector>
+
+
 //OTA updates
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
@@ -38,7 +46,7 @@
 
 const char* firmwareVersionURL = "https://raw.githubusercontent.com/Mepwoofer96/ESP32-inventory-system/main/version.txt";
 const char* firmwareBinURL = "https://raw.githubusercontent.com/Mepwoofer96/ESP32-inventory-system/main/inventory/inventory.ino.bin";
-const char* currentFirmwareVersion = "0.38.1";
+const char* currentFirmwareVersion = "0.41.1";
 bool otaCheckRequested = false;
 
 // Wifi and AP settings
@@ -71,12 +79,74 @@ String cachedCount = "";
 String cssCache = "";
 
 //captive portal
-
 bool portalAccepted = false;
 
+// Rfid
+#define RFID_CS_PIN 26
+#define RFID_RST_PIN 27
+#define RFID_H_MISO 12
+#define RFID_H_MOSI 13
+#define RFID_H_CLK  14
+
+SPIClass hspi(HSPI);
+MFRC522DriverPinSimple ss_pin(RFID_CS_PIN);
+MFRC522DriverSPI driver{ss_pin, hspi};
+MFRC522 mfrc522{driver};
 
 
-// --- Firmware (.bin) update — now returns bool so callers know if it succeeded ---
+
+bool nfcWriteRequested = false;
+String nfcWriteName = "";
+String nfcWriteStatus = "idle";  // idle, waiting, success, failed
+
+// RFID and SD helper making both run without corrupting eachother
+SemaphoreHandle_t spiMutex;
+
+
+void initRFID() {
+  hspi.begin(RFID_H_CLK, RFID_H_MISO, RFID_H_MOSI, RFID_CS_PIN);
+  mfrc522.PCD_Init();
+  Serial.println("RFID reader initialized");
+}
+
+// Builds and writes an NDEF URI record pointing at your inventory site
+bool writeNDEFUrl(const String& partName) {
+  String urlSuffix = "inventory.local/part?name=" + partName;  // goes after "http://"
+  uint8_t idCode = 0x03;                                       // NDEF URI abbreviation code for "http://"
+
+  std::vector<uint8_t> record;
+  record.push_back(0xD1);                    // header: MB=1,ME=1,SR=1,TNF=well-known
+  record.push_back(0x01);                    // type length
+  record.push_back(1 + urlSuffix.length());  // payload length
+  record.push_back(0x55);                    // type = 'U' (URI)
+  record.push_back(idCode);
+  for (size_t i = 0; i < urlSuffix.length(); i++) record.push_back((uint8_t)urlSuffix[i]);
+
+  std::vector<uint8_t> tlv;
+  tlv.push_back(0x03);  // NDEF Message TLV
+  tlv.push_back(record.size());
+  for (auto b : record) tlv.push_back(b);
+  tlv.push_back(0xFE);  // Terminator TLV
+  while (tlv.size() % 4 != 0) tlv.push_back(0x00);
+
+  // Capability container — required so phones recognize this as NDEF-formatted
+  uint8_t cc[4] = { 0xE1, 0x10, 0x06, 0x00 };  // 0x06 = NTAG213; use 0x3E for NTAG215, 0x6D for NTAG216
+  mfrc522.MIFARE_Ultralight_Write(3, cc, 4);
+
+  uint8_t page = 4;
+  for (size_t i = 0; i < tlv.size(); i += 4) {
+    uint8_t buf[4] = { tlv[i], tlv[i + 1], tlv[i + 2], tlv[i + 3] };
+    MFRC522::StatusCode status = mfrc522.MIFARE_Ultralight_Write(page, buf, 4);
+    if (status != MFRC522::StatusCode::STATUS_OK) {
+      Serial.println("Write failed at page " + String(page) + ": " + String(MFRC522Debug::GetStatusCodeName(status)));
+      return false;
+    }
+    page++;
+  }
+  return true;
+}
+
+
 // --- Firmware (.bin) update ---
 bool performFirmwareUpdate() {
   WiFiClientSecure client;
@@ -162,33 +232,36 @@ bool downloadFileToSD(WiFiClientSecure& client, const char* url, const char* sdP
 
   int contentLength = http.getSize();
   String tempPath = String(sdPath) + ".tmp";
+  bool ok = false;
 
-  File file = SD.open(tempPath, FILE_WRITE);
-  if (!file) {
-    http.end();
-    return false;
+  if (xSemaphoreTake(spiMutex, portMAX_DELAY)) {
+    File file = SD.open(tempPath, FILE_WRITE);
+    if (!file) {
+      xSemaphoreGive(spiMutex);
+      http.end();
+      return false;
+    }
+
+    int written = http.writeToStream(&file);
+    file.close();
+
+    if (written < 0) {
+      Serial.println("Download error (" + String(written) + "), keeping old " + String(sdPath));
+      SD.remove(tempPath);
+    } else if (contentLength > 0 && written != contentLength) {
+      Serial.println("Download incomplete (" + String(written) + "/" + String(contentLength) + "), keeping old " + String(sdPath));
+      SD.remove(tempPath);
+    } else {
+      SD.remove(sdPath);
+      SD.rename(tempPath, sdPath);
+      Serial.println("Updated: " + String(sdPath));
+      ok = true;
+    }
+    xSemaphoreGive(spiMutex);
   }
 
-  int written = http.writeToStream(&file);
-  file.close();
   http.end();
-
-  if (written < 0) {
-    Serial.println("Download error (" + String(written) + "), keeping old " + String(sdPath));
-    SD.remove(tempPath);
-    return false;
-  }
-
-  if (contentLength > 0 && written != contentLength) {
-    Serial.println("Download incomplete (" + String(written) + "/" + String(contentLength) + "), keeping old " + String(sdPath));
-    SD.remove(tempPath);
-    return false;
-  }
-
-  SD.remove(sdPath);
-  SD.rename(tempPath, sdPath);
-  Serial.println("Updated: " + String(sdPath));
-  return true;
+  return ok;
 }
 
 // --- Overall OTA check ---
@@ -250,8 +323,6 @@ void performOTACheck() {
   downloadFileToSD(assetClient, "https://raw.githubusercontent.com/Mepwoofer96/ESP32-inventory-system/main/inventory/htmls/style.css", "/htmls/style.css");
   delay(500);
   downloadFileToSD(assetClient, "https://raw.githubusercontent.com/Mepwoofer96/ESP32-inventory-system/main/inventory/htmls/index.html", "/htmls/index.html");
-  delay(500);
-  downloadFileToSD(assetClient, "https://raw.githubusercontent.com/Mepwoofer96/ESP32-inventory-system/main/inventory/htmls/portal_gate.html", "/htmls/portal_gate.html");
 
   assetClient.stop();
   loadFileCache();
@@ -264,32 +335,37 @@ String escapePDFText(String s) {
   return s;
 }
 
+
 void loadFileCache() {
-  File f = SD.open("/htmls/style.css", "r");
-  if (f) {
-    while (f.available()) {
-      cssCache += (char)f.read();
+  if (xSemaphoreTake(spiMutex, portMAX_DELAY)) {
+    File f = SD.open("/htmls/style.css", "r");
+    if (f) {
+      while (f.available()) cssCache += (char)f.read();
+      f.close();
+      Serial.println("CSS cached");
     }
-    f.close();
-    Serial.println("CSS cached");
+    xSemaphoreGive(spiMutex);
   }
 }
 
 void loadPartCache(const String& name) {
   if (cachedName == name) return;
-  File file = SD.open("/data/parts.csv", "r");
-  while (file.available()) {
-    String line = file.readStringUntil('\n');
-    line.trim();
-    int commaIndex = line.indexOf(',');
-    String n = line.substring(0, commaIndex);
-    if (n == name) {
-      cachedName = n;
-      cachedCount = line.substring(commaIndex + 1);
-      break;
+  if (xSemaphoreTake(spiMutex, portMAX_DELAY)) {
+    File file = SD.open("/data/parts.csv", "r");
+    while (file.available()) {
+      String line = file.readStringUntil('\n');
+      line.trim();
+      int commaIndex = line.indexOf(',');
+      String n = line.substring(0, commaIndex);
+      if (n == name) {
+        cachedName = n;
+        cachedCount = line.substring(commaIndex + 1);
+        break;
+      }
     }
+    file.close();
+    xSemaphoreGive(spiMutex);
   }
-  file.close();
 }
 
 // PROCESSOR
@@ -297,26 +373,29 @@ void loadPartCache(const String& name) {
 String processor(const String& var) {
   // If var is %PART_LIST% used in index to show all current inventory options
   if (var == "PART_LIST") {
-    File file = SD.open("/data/parts.csv", "r");
-    if (!file) {
-      return "<tr><td>No parts found</td></tr>";
-    }
     String output = "";
-    while (file.available()) {
-      String line = file.readStringUntil('\n');
-      line.trim();
-      if (line.length() == 0) continue;
-      int commaIndex = line.indexOf(',');
-      String name = line.substring(0, commaIndex);
-      String count = line.substring(commaIndex + 1);
-
-      output += "<tr>";
-      output += "<td><a href='/part?name=" + name + "'>" + name + "</a></td>";
-      output += "<td><span class='stock'>" + count + "</span></td>";
-      output += "<td><a href='/pdfs/" + name + ".pdf'>View</a></td>";
-      output += "</tr>";
+    if (xSemaphoreTake(spiMutex, portMAX_DELAY)) {
+      File file = SD.open("/data/parts.csv", "r");
+      if (!file) {
+        xSemaphoreGive(spiMutex);
+        return "<tr><td>No parts found</td></tr>";
+      }
+      while (file.available()) {
+        String line = file.readStringUntil('\n');
+        line.trim();
+        if (line.length() == 0) continue;
+        int commaIndex = line.indexOf(',');
+        String name = line.substring(0, commaIndex);
+        String count = line.substring(commaIndex + 1);
+        output += "<tr>";
+        output += "<td><a href='/part?name=" + name + "'>" + name + "</a></td>";
+        output += "<td><span class='stock'>" + count + "</span></td>";
+        output += "<td><a href='/pdfs/" + name + ".pdf'>View</a></td>";
+        output += "</tr>";
+      }
+      file.close();
+      xSemaphoreGive(spiMutex);
     }
-    file.close();
     return output;
   }
   // If var is %PART_NAME% handles requests for specific part names on the parts html page
@@ -406,10 +485,13 @@ void initRoutes() {
         String name = request->getParam("name", true)->value();
         String count = request->getParam("count", true)->value();
 
-        File csv = SD.open("/data/parts.csv", FILE_APPEND);
-        if (csv) {
-          csv.println(name + "," + count);
-          csv.close();
+        if (xSemaphoreTake(spiMutex, portMAX_DELAY)) {
+          File csv = SD.open("/data/parts.csv", FILE_APPEND);
+          if (csv) {
+            csv.println(name + "," + count);
+            csv.close();
+          }
+          xSemaphoreGive(spiMutex);
         }
         request->redirect("/writetag?name=" + name);
       } else {
@@ -424,15 +506,21 @@ void initRoutes() {
 
       if (filename.endsWith(".pdf")) {
         String path = "/pdfs/" + partName + ".pdf";
-        if (index == 0) request->_tempFile = SD.open(path, FILE_WRITE);
-        if (request->_tempFile) request->_tempFile.write(data, len);
-        if (final) request->_tempFile.close();
+        if (xSemaphoreTake(spiMutex, portMAX_DELAY)) {
+          if (index == 0) request->_tempFile = SD.open(path, FILE_WRITE);
+          if (request->_tempFile) request->_tempFile.write(data, len);
+          if (final) request->_tempFile.close();
+          xSemaphoreGive(spiMutex);
+        }
       }
       if (filename.endsWith(".jpg")) {
         String path = "/photos/" + partName + ".jpg";
-        if (index == 0) request->_tempFile = SD.open(path, FILE_WRITE);
-        if (request->_tempFile) request->_tempFile.write(data, len);
-        if (final) request->_tempFile.close();
+        if (xSemaphoreTake(spiMutex, portMAX_DELAY)) {
+          if (index == 0) request->_tempFile = SD.open(path, FILE_WRITE);
+          if (request->_tempFile) request->_tempFile.write(data, len);
+          if (final) request->_tempFile.close();
+          xSemaphoreGive(spiMutex);
+        }
       }
     });
 
@@ -450,44 +538,49 @@ void initRoutes() {
   server->on("/deletepart", HTTP_POST, [](AsyncWebServerRequest* request) {
     if (request->hasParam("name", true)) {
       String nameToDelete = request->getParam("name", true)->value();
+      bool ok = true;
 
-      // read existing csv
-      File csv = SD.open("/data/parts.csv", "r");
-      if (!csv) {
-        request->send(500, "text/plain", "Could not open CSV");
-        return;
-      }
-
-      // build a new string with every line EXCEPT the one to delete
-      String newCSV = "";
-      while (csv.available()) {
-        String line = csv.readStringUntil('\n');
-        line.trim();
-        if (line.length() == 0) continue;
-        int commaIndex = line.indexOf(',');
-        String name = line.substring(0, commaIndex);
-        if (name != nameToDelete) {
-          newCSV += line + "\n";
-        } else {
-          Serial.println("Deleting: " + name);
+      if (xSemaphoreTake(spiMutex, portMAX_DELAY)) {
+        File csv = SD.open("/data/parts.csv", "r");
+        if (!csv) {
+          xSemaphoreGive(spiMutex);
+          request->send(500, "text/plain", "Could not open CSV");
+          return;
         }
+
+        String newCSV = "";
+        while (csv.available()) {
+          String line = csv.readStringUntil('\n');
+          line.trim();
+          if (line.length() == 0) continue;
+          int commaIndex = line.indexOf(',');
+          String name = line.substring(0, commaIndex);
+          if (name != nameToDelete) {
+            newCSV += line + "\n";
+          } else {
+            Serial.println("Deleting: " + name);
+          }
+        }
+        csv.close();
+
+        File out = SD.open("/data/parts.csv", FILE_WRITE);
+        if (!out) {
+          xSemaphoreGive(spiMutex);
+          request->send(500, "text/plain", "Could not write CSV");
+          return;
+        }
+        out.print(newCSV);
+        out.close();
+
+        SD.remove("/pdfs/" + nameToDelete + ".pdf");
+        SD.remove("/photos/" + nameToDelete + ".jpg");
+
+        xSemaphoreGive(spiMutex);
+      } else {
+        ok = false;
       }
-      csv.close();
 
-      // overwrite the csv with the new string
-      File out = SD.open("/data/parts.csv", FILE_WRITE);
-      if (!out) {
-        request->send(500, "text/plain", "Could not write CSV");
-        return;
-      }
-      out.print(newCSV);
-      out.close();
-
-      // delete the associated files
-      SD.remove("/pdfs/" + nameToDelete + ".pdf");
-      SD.remove("/photos/" + nameToDelete + ".jpg");
-
-      request->send(200, "text/plain", "Part deleted");
+      request->send(ok ? 200 : 500, "text/plain", ok ? "Part deleted" : "Busy, try again");
     } else {
       request->send(400, "text/plain", "Missing name");
     }
@@ -499,28 +592,29 @@ void initRoutes() {
       String name = request->getParam("name", true)->value();
       String newCount = request->getParam("count", true)->value();
 
-      // read csv into memory
-      File csv = SD.open("/data/parts.csv", "r");
-      String newCSV = "";
-      while (csv.available()) {
-        String line = csv.readStringUntil('\n');
-        line.trim();
-        if (line.length() == 0) continue;
-        int commaIndex = line.indexOf(',');
-        String lineName = line.substring(0, commaIndex);
-        if (lineName == name) {
-          // replace this line with updated count
-          newCSV += name + "," + newCount + "\n";
-        } else {
-          newCSV += line + "\n";
+      if (xSemaphoreTake(spiMutex, portMAX_DELAY)) {
+        File csv = SD.open("/data/parts.csv", "r");
+        String newCSV = "";
+        while (csv.available()) {
+          String line = csv.readStringUntil('\n');
+          line.trim();
+          if (line.length() == 0) continue;
+          int commaIndex = line.indexOf(',');
+          String lineName = line.substring(0, commaIndex);
+          if (lineName == name) {
+            newCSV += name + "," + newCount + "\n";
+          } else {
+            newCSV += line + "\n";
+          }
         }
-      }
-      csv.close();
+        csv.close();
 
-      // write back
-      File out = SD.open("/data/parts.csv", FILE_WRITE);
-      out.print(newCSV);
-      out.close();
+        File out = SD.open("/data/parts.csv", FILE_WRITE);
+        out.print(newCSV);
+        out.close();
+
+        xSemaphoreGive(spiMutex);
+      }
 
       request->send(200, "text/plain", "OK");
     }
@@ -545,66 +639,97 @@ void initRoutes() {
     request->send(200, "text/css", cssCache);
   });
 
-  // server->on("/internalnfc"){} //SHOULD CONNECT TO INTERNAL NFC WRITER TO WRITE A TAG
+  // Writing to a NFC tag
+  server->on("/internalnfc", HTTP_POST, [](AsyncWebServerRequest* request) {
+    Serial.println("requested internal nfc");
+    if (!request->authenticate(adminUser.c_str(), adminPass.c_str())) {
+      return request->requestAuthentication();
+    }
+    if (currentPartName.length() == 0) {
+      request->send(400, "text/plain", "No part selected");
+      return;
+    }
+    nfcWriteName = currentPartName;
+    nfcWriteStatus = "waiting";
+    nfcWriteRequested = true;
+    request->send(200, "text/plain", "Tap the tag now...");
+  });
+
+  server->on("/nfcstatus", HTTP_GET, [](AsyncWebServerRequest* request) {
+    request->send(200, "text/plain", nfcWriteStatus);
+  });
 
   //generates a PDF report of the parts.csv inventory
   server->on("/printpdf", HTTP_GET, [](AsyncWebServerRequest* request) {
-    File csv = SD.open("/data/parts.csv", "r");
-    if (!csv) {
-      request->send(404, "text/plain", "No inventory data found");
-      return;
-    }
+    String pdf;
+    bool ok = false;
 
-    int col1X = 50;   // Part Number column
-    int col2X = 320;  // Count column
-    int y = 740;
-    int lineHeight = 20;
+    if (xSemaphoreTake(spiMutex, portMAX_DELAY)) {
+      File csv = SD.open("/data/parts.csv", "r");
+      if (!csv) {
+        xSemaphoreGive(spiMutex);
+        request->send(404, "text/plain", "No inventory data found");
+        return;
+      }
 
-    String content = "";
+      int col1X = 50;   // Part Number column
+      int col2X = 320;  // Count column
+      int y = 740;
+      int lineHeight = 20;
 
-    // Title
-    content += "BT /F2 22 Tf 50 770 Td (Inventory Report) Tj ET\n";
+      String content = "";
 
-    // Header row (bold)
-    content += "BT /F2 12 Tf " + String(col1X) + " " + String(y) + " Td (Part Number) Tj ET\n";
-    content += "BT /F2 12 Tf " + String(col2X) + " " + String(y) + " Td (Count) Tj ET\n";
+      // Title
+      content += "BT /F2 22 Tf 50 770 Td (Inventory Report) Tj ET\n";
 
-    // Divider line under header
-    y -= 8;
-    content += String(col1X) + " " + String(y) + " m 550 " + String(y) + " l S\n";
-    y -= lineHeight;
+      // Header row (bold)
+      content += "BT /F2 12 Tf " + String(col1X) + " " + String(y) + " Td (Part Number) Tj ET\n";
+      content += "BT /F2 12 Tf " + String(col2X) + " " + String(y) + " Td (Count) Tj ET\n";
 
-    while (csv.available()) {
-      String line = csv.readStringUntil('\n');
-      line.trim();
-      if (line.length() == 0) continue;
-
-      int commaIndex = line.indexOf(',');
-      String name = escapePDFText(line.substring(0, commaIndex));
-      String count = escapePDFText(line.substring(commaIndex + 1));
-
-      content += "BT /F1 12 Tf " + String(col1X) + " " + String(y) + " Td (" + name + ") Tj ET\n";
-      content += "BT /F1 12 Tf " + String(col2X) + " " + String(y) + " Td (" + count + ") Tj ET\n";
+      // Divider line under header
+      y -= 8;
+      content += String(col1X) + " " + String(y) + " m 550 " + String(y) + " l S\n";
       y -= lineHeight;
 
-      if (y < 50) break;  // stop before running off the page
-    }
-    csv.close();
+      while (csv.available()) {
+        String line = csv.readStringUntil('\n');
+        line.trim();
+        if (line.length() == 0) continue;
 
-    // --- assemble the PDF ---
-    String pdf = "%PDF-1.4\n";
-    pdf += "1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n";
-    pdf += "2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n";
-    pdf += "3 0 obj<</Type/Page/Parent 2 0 R/Resources<</Font<</F1 5 0 R/F2 6 0 R>>>>/MediaBox[0 0 612 792]/Contents 4 0 R>>endobj\n";
-    pdf += "4 0 obj<</Length " + String(content.length()) + ">>stream\n";
-    pdf += content;
-    pdf += "endstream endobj\n";
-    pdf += "5 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj\n";
-    pdf += "6 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica-Bold>>endobj\n";
-    int xrefStart = pdf.length();
-    pdf += "xref\n0 7\n0000000000 65535 f \n";
-    pdf += "trailer<</Size 7/Root 1 0 R>>\n";
-    pdf += "startxref\n" + String(xrefStart) + "\n%%EOF";
+        int commaIndex = line.indexOf(',');
+        String name = escapePDFText(line.substring(0, commaIndex));
+        String count = escapePDFText(line.substring(commaIndex + 1));
+
+        content += "BT /F1 12 Tf " + String(col1X) + " " + String(y) + " Td (" + name + ") Tj ET\n";
+        content += "BT /F1 12 Tf " + String(col2X) + " " + String(y) + " Td (" + count + ") Tj ET\n";
+        y -= lineHeight;
+
+        if (y < 50) break;  // stop before running off the page
+      }
+      csv.close();
+      xSemaphoreGive(spiMutex);
+
+      // --- assemble the PDF (no SD access below, safe outside the lock) ---
+      pdf = "%PDF-1.4\n";
+      pdf += "1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n";
+      pdf += "2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n";
+      pdf += "3 0 obj<</Type/Page/Parent 2 0 R/Resources<</Font<</F1 5 0 R/F2 6 0 R>>>>/MediaBox[0 0 612 792]/Contents 4 0 R>>endobj\n";
+      pdf += "4 0 obj<</Length " + String(content.length()) + ">>stream\n";
+      pdf += content;
+      pdf += "endstream endobj\n";
+      pdf += "5 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj\n";
+      pdf += "6 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica-Bold>>endobj\n";
+      int xrefStart = pdf.length();
+      pdf += "xref\n0 7\n0000000000 65535 f \n";
+      pdf += "trailer<</Size 7/Root 1 0 R>>\n";
+      pdf += "startxref\n" + String(xrefStart) + "\n%%EOF";
+      ok = true;
+    }
+
+    if (!ok) {
+      request->send(500, "text/plain", "Busy, try again");
+      return;
+    }
 
     AsyncWebServerResponse* response = request->beginResponse(200, "application/pdf", pdf);
     response->addHeader("Content-Disposition", "attachment; filename=inventory.pdf");
@@ -620,9 +745,35 @@ void initRoutes() {
     }
   });
 
-  // serve static files (css, photos, pdfs)
-  server->serveStatic("/pdfs/", SD, "/pdfs/");
-  server->serveStatic("/photos/", SD, "/photos/");
+  // Manual, mutex-protected PDF/photo serving — replaces serveStatic(), which
+  // has no hook to lock around, so it could still collide with RFID reads.
+  server->on("/pdfs/*", HTTP_GET, [](AsyncWebServerRequest* request) {
+    String path = request->url();
+    if (xSemaphoreTake(spiMutex, portMAX_DELAY)) {
+      if (SD.exists(path)) {
+        request->send(SD, path, "application/pdf");
+      } else {
+        request->send(404);
+      }
+      xSemaphoreGive(spiMutex);
+    } else {
+      request->send(500, "text/plain", "Busy, try again");
+    }
+  });
+
+  server->on("/photos/*", HTTP_GET, [](AsyncWebServerRequest* request) {
+    String path = request->url();
+    if (xSemaphoreTake(spiMutex, portMAX_DELAY)) {
+      if (SD.exists(path)) {
+        request->send(SD, path, "image/jpeg");
+      } else {
+        request->send(404);
+      }
+      xSemaphoreGive(spiMutex);
+    } else {
+      request->send(500, "text/plain", "Busy, try again");
+    }
+  });
 
   // Captive portals
   // Android captive portal check
@@ -737,10 +888,16 @@ void setup() {
   Serial.begin(115200);
   delay(1000);
 
+  // create the mutex BEFORE anything tries to use it
+  spiMutex = xSemaphoreCreateMutex();
+
   //use sd
   initSDCard();
 
   delay(500);
+
+  initRFID();
+  MFRC522Debug::PCD_DumpVersionToSerial(mfrc522, Serial);
 
   loadFileCache();
 
@@ -770,5 +927,18 @@ void loop() {
   if (otaCheckRequested) {
     otaCheckRequested = false;
     performOTACheck();
+  }
+
+  if (nfcWriteRequested) {
+    if (xSemaphoreTake(spiMutex, portMAX_DELAY)) {
+      if (mfrc522.PICC_IsNewCardPresent() && mfrc522.PICC_ReadCardSerial()) {
+        bool ok = writeNDEFUrl(nfcWriteName);
+        nfcWriteStatus = ok ? "success" : "failed";
+        nfcWriteRequested = false;
+        mfrc522.PICC_HaltA();
+        mfrc522.PCD_StopCrypto1();
+      }
+      xSemaphoreGive(spiMutex);
+    }
   }
 }
