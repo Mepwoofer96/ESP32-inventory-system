@@ -84,7 +84,7 @@ bool portalAccepted = false;
 // Rfid
 #define RFID_CS_PIN 26
 #define RFID_RST_PIN 27
-#define RFID_H_MISO 12
+#define RFID_H_MISO 35
 #define RFID_H_MOSI 13
 #define RFID_H_CLK  14
 
@@ -102,7 +102,7 @@ String nfcWriteStatus = "idle";  // idle, waiting, success, failed
 // RFID and SD helper making both run without corrupting eachother
 SemaphoreHandle_t spiMutex;
 
-
+// Initiate RFID Writer
 void initRFID() {
   hspi.begin(RFID_H_CLK, RFID_H_MISO, RFID_H_MOSI, RFID_CS_PIN);
   mfrc522.PCD_Init();
@@ -145,7 +145,6 @@ bool writeNDEFUrl(const String& partName) {
   }
   return true;
 }
-
 
 // --- Firmware (.bin) update ---
 bool performFirmwareUpdate() {
@@ -335,7 +334,7 @@ String escapePDFText(String s) {
   return s;
 }
 
-
+// Load CSS into memory
 void loadFileCache() {
   if (xSemaphoreTake(spiMutex, portMAX_DELAY)) {
     File f = SD.open("/htmls/style.css", "r");
@@ -348,6 +347,7 @@ void loadFileCache() {
   }
 }
 
+// Gets part from database
 void loadPartCache(const String& name) {
   if (cachedName == name) return;
   if (xSemaphoreTake(spiMutex, portMAX_DELAY)) {
