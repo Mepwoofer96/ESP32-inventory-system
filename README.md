@@ -41,3 +41,15 @@ Displays:
 **AP mode** makes the inventory system create its own WiFi network. You can connect to this WiFi with the given NFC tag, or by going into your settings, finding the "ESP_Inventory" network, and connecting manually. This WiFi will prompt you with a sign-in page; after signing in, it should take you to the Index page. If you need to go to the Admin page, exit the sign-in page and either scan the given NFC tag or type in <http://inventory.local> (make sure no VPN is on).
 
 **Creating a new part** will take you to an NFC page. If the page says it's unable to write the NFC tag from your phone, place the NFC tag onto the writer connected to the inventory system and press **"Write from Onboard NFC."**
+
+
+## Navigating repo
+**Folder Structure**
+
+INVENTORY: Where everything for the project currently used is put into unless put into the unused folder inside
+
+OLDS: any old version of the code that is fundementaly different
+
+Tests: any code that was a test for certain things 
+
+
