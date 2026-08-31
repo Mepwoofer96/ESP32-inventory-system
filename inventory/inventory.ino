@@ -46,7 +46,7 @@
 
 const char* firmwareVersionURL = "https://raw.githubusercontent.com/Mepwoofer96/ESP32-inventory-system/main/version.txt";
 const char* firmwareBinURL = "https://raw.githubusercontent.com/Mepwoofer96/ESP32-inventory-system/main/inventory/inventory.ino.bin";
-const char* currentFirmwareVersion = "0.41.1";
+const char* currentFirmwareVersion = "0.50.1";
 bool otaCheckRequested = false;
 
 // Wifi and AP settings
@@ -476,8 +476,7 @@ void initRoutes() {
 
   //for dns lying
   // add part — appends to CSV and saves uploaded files
-  server->on(
-    "/addpart", HTTP_POST, [](AsyncWebServerRequest* request) {
+  server->on("/addpart", HTTP_POST, [](AsyncWebServerRequest* request) {
       if (!request->authenticate(adminUser.c_str(), adminPass.c_str())) {
         return request->requestAuthentication();
       }
@@ -649,10 +648,11 @@ void initRoutes() {
       request->send(400, "text/plain", "No part selected");
       return;
     }
+    request->send(SD, "/htmls/onboardrfid.html", "text/html", false, processor);
     nfcWriteName = currentPartName;
     nfcWriteStatus = "waiting";
     nfcWriteRequested = true;
-    request->send(200, "text/plain", "Tap the tag now...");
+
   });
 
   server->on("/nfcstatus", HTTP_GET, [](AsyncWebServerRequest* request) {
