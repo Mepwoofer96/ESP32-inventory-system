@@ -625,13 +625,13 @@ void initRoutes() {
       wifiSSID = request->getParam("ssid", true)->value();
       wifiPass = request->getParam("password", true)->value();
       wifiRequested = true;
-      request->send(200, "text/plain", "Connecting to WiFi...");
+      request->send(200, "text/plain", "Connecting to WiFi...\n Connect to wifi you entered and come back to this page and reload");
     }
   });
 
   server->on("/setap", HTTP_POST, [](AsyncWebServerRequest* request) {
     apRequested = true;
-    request->send(200, "text/plain", "Switching to AP mode...");
+    request->send(200, "text/plain", "Switching to AP mode...\n Connect to AP or the Inventory_ESP wifi and reload this page");
   });
 
   server->on("/style.css", HTTP_GET, [](AsyncWebServerRequest* request) {
@@ -645,7 +645,7 @@ void initRoutes() {
       return request->requestAuthentication();
     }
     if (currentPartName.length() == 0) {
-      request->send(400, "text/plain", "No part selected");
+      request->send(400, "text/plain", "No part selected. Please go back");
       return;
     }
     request->send(SD, "/htmls/onboardrfid.html", "text/html", false, processor);
