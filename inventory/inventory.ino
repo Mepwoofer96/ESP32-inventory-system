@@ -46,7 +46,7 @@
 
 const char* firmwareVersionURL = "https://raw.githubusercontent.com/Mepwoofer96/ESP32-inventory-system/main/version.txt";
 const char* firmwareBinURL = "https://raw.githubusercontent.com/Mepwoofer96/ESP32-inventory-system/main/inventory/inventory.ino.bin";
-const char* currentFirmwareVersion = "0.41.1";
+const char* currentFirmwareVersion = "0.50.1";
 bool otaCheckRequested = false;
 
 // Wifi and AP settings
@@ -476,8 +476,7 @@ void initRoutes() {
 
   //for dns lying
   // add part — appends to CSV and saves uploaded files
-  server->on(
-    "/addpart", HTTP_POST, [](AsyncWebServerRequest* request) {
+  server->on("/addpart", HTTP_POST, [](AsyncWebServerRequest* request) {
       if (!request->authenticate(adminUser.c_str(), adminPass.c_str())) {
         return request->requestAuthentication();
       }
@@ -626,13 +625,13 @@ void initRoutes() {
       wifiSSID = request->getParam("ssid", true)->value();
       wifiPass = request->getParam("password", true)->value();
       wifiRequested = true;
-      request->send(200, "text/plain", "Connecting to WiFi...");
+      request->send(200, "text/plain", "Connecting to WiFi...\n Connect to wifi you entered and come back to this page and reload");
     }
   });
 
   server->on("/setap", HTTP_POST, [](AsyncWebServerRequest* request) {
     apRequested = true;
-    request->send(200, "text/plain", "Switching to AP mode...");
+    request->send(200, "text/plain", "Switching to AP mode...\n Connect to AP or the Inventory_ESP wifi and reload this page");
   });
 
   server->on("/style.css", HTTP_GET, [](AsyncWebServerRequest* request) {
@@ -646,13 +645,14 @@ void initRoutes() {
       return request->requestAuthentication();
     }
     if (currentPartName.length() == 0) {
-      request->send(400, "text/plain", "No part selected");
+      request->send(400, "text/plain", "No part selected. Please go back");
       return;
     }
+    request->send(SD, "/htmls/onboardrfid.html", "text/html", false, processor);
     nfcWriteName = currentPartName;
     nfcWriteStatus = "waiting";
     nfcWriteRequested = true;
-    request->send(200, "text/plain", "Tap the tag now...");
+
   });
 
   server->on("/nfcstatus", HTTP_GET, [](AsyncWebServerRequest* request) {

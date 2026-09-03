@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>NFC — Inventory</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
+<link rel="stylesheet" type="text/css" href="style.css">
+<style>
+body { visibility: hidden; background: #0d0d0d; margin: 0; }
+</style>
+<!-- Reveal the page once CSS is loaded -->
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+document.body.style.visibility = 'visible';
+    });
+</script>
+<style>
+  :root {
+    --success: #4fd68e;
+    --success-dim: #1e6b48;
+  }
+
+  /* ── NFC PULSE ICON ── */
+  .nfc-scan {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1.25rem;
+    padding: 2rem 0;
+  }
+
+  .nfc-scan svg {
+    width: 120px;
+    height: 120px;
+  }
+
+  .nfc-dot {
+    fill: var(--text-dim);
+    transition: fill 0.15s;
+  }
+
+  .nfc-arc {
+    fill: none;
+    stroke: var(--border);
+    stroke-width: 6;
+    stroke-linecap: round;
+    transition: stroke 0.15s;
+  }
+
+  /* stage 0: dot lights */
+  .nfc-scan.s0 .nfc-dot { fill: var(--accent); }
+
+  /* stage 1: dot + inner arcs light */
+  .nfc-scan.s1 .nfc-dot,
+  .nfc-scan.s1 .nfc-arc.inner { stroke: var(--accent); }
+  .nfc-scan.s1 .nfc-dot { fill: var(--accent); }
+
+  /* stage 2: dot + inner + outer arcs light */
+  .nfc-scan.s2 .nfc-dot,
+  .nfc-scan.s2 .nfc-arc.inner,
+  .nfc-scan.s2 .nfc-arc.outer { stroke: var(--accent); }
+  .nfc-scan.s2 .nfc-dot { fill: var(--accent); }
+
+  /* success: everything green, animation stops */
+  .nfc-scan.success .nfc-dot,
+  .nfc-scan.success .nfc-arc.inner,
+  .nfc-scan.success .nfc-arc.outer { stroke: var(--success); }
+  .nfc-scan.success .nfc-dot { fill: var(--success); }
+
+  .nfc-label {
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    transition: color 0.15s;
+  }
+
+  .nfc-label span {
+    color: var(--accent);
+  }
+
+  .nfc-scan.success .nfc-label span {
+    color: var(--success);
+  }
+
+  /* error: everything red, using existing --danger var from style.css */
+  .nfc-scan.error .nfc-dot,
+  .nfc-scan.error .nfc-arc.inner,
+  .nfc-scan.error .nfc-arc.outer { stroke: var(--danger); }
+  .nfc-scan.error .nfc-dot { fill: var(--danger); }
+
+  .nfc-scan.error .nfc-label span {
+    color: var(--danger);
+  }
+
+  .nfc-actions {
+    display: flex;
+    justify-content: center;
+    padding: 0 2rem 2rem;
+  }
+
+  .btn-success {
+    background: var(--success);
+    color: #fff;
+  }
+
+  .btn-success:hover {
+    background: #5fe6a0;
+  }
+</style>
+</head>
+<body>
+<div class="topbar">
+<span class="topbar-brand">// Light it Up &nbsp;· &nbsp;Inventory</span>
+<nav class="topbar-nav">
+</nav>
+</div>
+
+<div class="page">
+<h1>NFC <span>Progress</span></h1>
+<div class="form-card">
+  <div class="nfc-scan" id="nfcScan">
+    <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+      <!-- center dot -->
+      <circle class="nfc-dot" cx="50" cy="50" r="4"/>
+
+      <!-- inner arcs -->
+      <path class="nfc-arc inner" d="M 38 38 A 17 17 0 0 0 38 62"/>
+      <path class="nfc-arc inner" d="M 62 38 A 17 17 0 0 1 62 62"/>
+
+      <!-- outer arcs -->
+      <path class="nfc-arc outer" d="M 26 24 A 37 37 0 0 0 26 76"/>
+      <path class="nfc-arc outer" d="M 74 24 A 37 37 0 0 1 74 76"/>
+    </svg>
+    <div class="nfc-label">Waiting for <span>tag</span>&hellip;</div>
+  </div>
+</div>
+
+<div class="nfc-actions">
+  <form method="POST" action="/internalnfc" id="nfcRetryForm" style="display:none;">
+    <button class="btn btn-success" type="submit">Retry</button>
+  </form>
+</div>
+</div>
+
+<script>
+  (function () {
+    const el = document.getElementById('nfcScan');
+    const label = el.querySelector('.nfc-label');
+    const retryForm = document.getElementById('nfcRetryForm');
+    const stages = ['s0', 's1', 's2'];
+    let i = 0;
+    let animTimer = null;
+    let pollTimer = null;
+
+    function setState(cls) {
+      el.classList.remove('s0', 's1', 's2', 'success', 'error');
+      el.classList.add(cls);
+    }
+
+    function tick() {
+      setState(stages[i]);
+      i = (i + 1) % stages.length;
+    }
+
+    function startAnim() {
+      tick();
+      animTimer = setInterval(tick, 450);
+    }
+
+    function stopAnim() {
+      clearInterval(animTimer);
+      animTimer = null;
+    }
+
+    function stopPolling() {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
+
+    function onSuccess() {
+      stopPolling();
+      stopAnim();
+      setState('success');
+      label.innerHTML = '<span>NFC successfully written</span> — redirecting&hellip;';
+      setTimeout(function () {
+        window.location.href = '/';
+      }, 1500);
+    }
+
+    function onFailed() {
+      stopPolling();
+      stopAnim();
+      setState('error');
+      label.innerHTML = '<span>NFC write failed</span> — tag not detected';
+      retryForm.style.display = 'block';
+    }
+
+    function onConnectionLost() {
+      stopPolling();
+      stopAnim();
+      setState('error');
+      label.innerHTML = '<span>Lost connection</span> to device';
+      retryForm.style.display = 'block';
+    }
+
+    function pollStatus() {
+      fetch('/nfcstatus')
+        .then(function (res) { return res.text(); })
+        .then(function (status) {
+          status = status.trim().toLowerCase();
+
+          // Matches firmware's nfcWriteStatus values: idle, waiting, success, failed
+          if (status === 'success') {
+            onSuccess();
+          } else if (status === 'failed') {
+            onFailed();
+          }
+          // "waiting" (or "idle") — keep polling, keep animating
+        })
+        .catch(onConnectionLost);
+    }
+
+    // The POST to /internalnfc already happened server-side to get us
+    // this page (it's served as that request's response body), and
+    // nfcWriteStatus is already "waiting" by the time we're here.
+    // So just start the pulse animation and start polling immediately.
+    startAnim();
+    pollTimer = setInterval(pollStatus, 700);
+    pollStatus(); // fire once immediately instead of waiting 700ms
+  })();
+</script>
+</body>
+</html>
