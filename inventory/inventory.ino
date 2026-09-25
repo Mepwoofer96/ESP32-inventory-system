@@ -7,7 +7,7 @@
 //
 //  Hardware used
 //
-//  NFC tags, ESP32 microcontroller, HW-125 SD Card Adapter, Possibly NFC writer
+//  NFC tags, ESP32 microcontroller, HW-125 SD Card Adapter, NFC writer
 //
 //
 //  How it works:
